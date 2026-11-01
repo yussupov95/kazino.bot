@@ -30,6 +30,7 @@ except ImportError:
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
+from vk_api import VkApi
  
 # ===================== НАСТРОЙКИ =====================
 # Токен лучше хранить в переменной окружения VK_TOKEN, а не в коде
