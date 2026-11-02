@@ -21,7 +21,14 @@ import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from vk_api import VkApi
+import sys
+import subprocess
+
+try:
+    import vk_api
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "vk_api"])
+    import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
