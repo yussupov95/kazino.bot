@@ -36,7 +36,7 @@ from vk_api import VkApi
 
 # ===================== НАСТРОЙКИ =====================
 # Токен лучше хранить в переменной окружения VK_TOKEN, а не в коде
-TOKEN = os.getenv("VK_TOKEN", "ВСТАВЬТЕ_ТОКЕН")
+TOKEN = os.getenv("VK_TOKEN", "vk1.a.453fvcUgOGlgEKnNjhkCI7p1-fttv173SfcoigGFuV8rlXRSTMcnqPfQ4vCAmuPdKnBJQWIfzZri_Yql8ff2PPWkXJNlzMz4QP96upSU04PwpEEJrzLcS0jITmJu9VYx1MJJ1uoMDWZfLiVgS51MppTv6BplA0X6rjvrvcJBIkMgOWaAn5eSWDluaMZ3XiDPV5jd8gYaxHqhEerHazETyw")
 GROUP_ID = 242679541
 OWNER_ID = 609908758
 
