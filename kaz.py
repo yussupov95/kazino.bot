@@ -2,15 +2,15 @@
 """
 VK-бот для бесед.
 
-Для всех:       команды, профиль, префикс, топ, история, правила, бонус, кошелёк, передать,
-                купить вип, мины, дуэль, рулетка, промокод, репорт, админы
+Для всех:       команды, профиль, топ, история, бонус, кошелёк, передать, купить вип,
+                мины, дуэль, промокод, репорт, админы
 Мл Модератор:   хелп, удалить, профиль (чужой), варн
 Ст Модератор:   мут, размут, снять варн
-Администратор:  права, кик, бан, разбан, префикс (смена), timeout
-Тех специалист: промокод (создание), деньги, забрать  — с разрешения владельца; опыт
+Администратор:  права, кик, бан, разбан, префикс, timeout
+Тех специалист: промокод (создание), деньги, опыт
 Владелец:       logs
 
-Установка:  pip install vk_api pillow
+Установка:  pip install vk_api
 Запуск:     python bot.py
 """
 import sys
@@ -22,20 +22,19 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "vk_api"])
     import vk_api
 import json
-import math
 import os
 import random
 import re
-import threading
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from vk_api import VkApi, VkUpload
+from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
 from vk_api import VkApi
+
 # ===================== НАСТРОЙКИ =====================
 # Токен лучше хранить в переменной окружения VK_TOKEN, а не в коде
 TOKEN = os.getenv("VK_TOKEN", "vk1.a.453fvcUgOGlgEKnNjhkCI7p1-fttv173SfcoigGFuV8rlXRSTMcnqPfQ4vCAmuPdKnBJQWIfzZri_Yql8ff2PPWkXJNlzMz4QP96upSU04PwpEEJrzLcS0jITmJu9VYx1MJJ1uoMDWZfLiVgS51MppTv6BplA0X6rjvrvcJBIkMgOWaAn5eSWDluaMZ3XiDPV5jd8gYaxHqhEerHazETyw")
@@ -86,29 +85,29 @@ PLAYER_LEVELS = [
 ]
 
 # --- Мины ---
-MINES_CELLS = 15                # всего клеток
-MINES_MIN = 3                   # минимум мин
-MINES_MAX = 12                  # максимум мин (в окне выбора не больше 10 кнопок)
+MINES_CELLS = 10                # всего клеток
+MINES_MIN = 2                   # минимум мин
+MINES_MAX = 9                   # максимум мин (должен остаться хотя бы 1 алмаз)
 MINES_HOUSE_EDGE = 0.03         # комиссия казино 3%
 MIN_BET = 100
 
 # --- Награды, цены, лимиты ---
 LEVEL_UP_REWARD = 10_000_000    # 10кк за каждый новый уровень игрока
 VIP_PRICE = 100_000_000         # 100кк
-VIP_BONUS_MONEY = 3_000_000     # 3кк в час для VIP
-VIP_PREFIX = "VIP✨✨"
+VIP_BONUS_MONEY = 2_500_000     # 2,5кк в час для VIP
+VIP_PREFIX = "VIP✨"
 TOP_REWARDS = (10, 5, 3)        # exp за 1/2/3 место дня по сообщениям
 HISTORY_DAYS = 7                # сколько прошлых топов хранить
 HISTORY_PAGES = 2               # страницы «истории»: промокоды, прошлые топы
 TRANSFER_MIN = 500_000          # передать: от 500к
-TRANSFER_MAX = 50_000_000       # передать: до 50кк
+TRANSFER_MAX = 10_000_000       # передать: до 10кк
 MAX_GRANT = 10 ** 15            # максимум денег за одну выдачу («деньги»)
 MAX_EXP_GRANT = 100_000         # максимум опыта за одну выдачу («опыт»)
 
 # --- Дуэли ---
 DUEL_CHAMBERS = 7               # гнёзд в барабане
 DUEL_MAX_BULLETS = 6            # патронов случайно от 1 до этого числа
-DUEL_PENDING_SECONDS = 60       # на принятие вызова — минута
+DUEL_PENDING_SECONDS = 300      # сколько действует вызов
 
 # --- Варны, тишина, репорты, логи ---
 WARNS_LIMIT = 3
@@ -120,47 +119,6 @@ REPORT_MAX_PER_WINDOW = 3
 LOGS_DIR = "logs"
 LOG_KEEP_DAYS = 7
 MAX_LOG_CHUNKS = 12             # максимум сообщений с логами за один раз
-
-# --- VIP, паузы, таймеры ---
-VIP_DAYS = 30                   # VIP действует месяц
-VIP_WIN_BONUS = 1.25            # VIP: коэффициенты выигрышей ×1.25 (2x → 2.5x)
-TRANSFER_COOLDOWN = 60          # пауза между переводами (у VIP паузы нет)
-REPORT_COOLDOWN = 60            # пауза между репортами
-DUEL_SHOT_SECONDS = 10          # время на выстрел в дуэли
-MINES_PAGE = 8                  # сколько клеток «Мин» показывать за раз (лимит VK — 10 кнопок)
-MINES_ROW = 5                   # клеток в строке
-
-# --- Рулетка ---
-ROULETTE_ORDER = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24,
-                  16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]   # порядок на колесе
-ROULETTE_RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
-ROULETTE_PAYOUT = 2             # выигрыш x2 (VIP: x2.5)
-ROULETTE_BETS = {
-    "красный": "red", "красное": "red", "красн": "red", "red": "red",
-    "черный": "black", "черное": "black", "черн": "black", "black": "black",
-    "чет": "even", "четный": "even", "четное": "even", "even": "even",
-    "нечет": "odd", "нечетный": "odd", "нечетное": "odd", "odd": "odd",
-}
-ROULETTE_TITLES = {"red": "🔴 красное", "black": "⚫ чёрное", "even": "✅ чётное", "odd": "❌ нечётное"}
-ROULETTE_CACHE_DIR = "cache"    # сюда сохраняются гифки (создаются один раз для каждого числа)
-ROULETTE_WHEEL_PX = 360         # размер колеса в гифке
-ROULETTE_FRAMES = 30
-ROULETTE_FRAME_MS = 80
-ROULETTE_DELAY = 4.0            # через сколько секунд после гифки объявить итог
-
-# --- Правила беседы (команда «правила») ---
-CHAT_RULES = [
-    "Уважайте всех участников: без оскорблений, угроз и травли.",
-    "Не флудите, не спамьте и не пишите капсом — за это варн.",
-    "Реклама, чужие ссылки, продажи и «вступай в группу» запрещены — бан.",
-    "Запрещены 18+ контент, шок-материалы и призывы к насилию.",
-    "Политику, религию и национальные темы в беседе не обсуждаем.",
-    "Не выдавайте себя за модераторов и не выпрашивайте права, деньги или VIP.",
-    "Ошибки бота не используйте в свою пользу — сообщайте о них через «репорт».",
-    "Не обманывайте игроков в переводах и дуэлях: мошенничество — бан.",
-    "Споры с модераторами в чате запрещены — жалобы пишите владельцу через «репорт».",
-    "За нарушения: 3 варна — кик, повторное — мут, грубое — сразу бан. Незнание правил не освобождает от ответственности.",
-]
 
 # --- Файлы ---
 DATA_FILE = "roles.json"        # роли: {peer_id: {user_id: уровень}}
@@ -178,9 +136,8 @@ def _n(x):
 # Раздел «команды»: кнопки переходят по разделам
 COMMAND_CATEGORIES = [
     ("🎮 Игры", [
-        ("мины [ставка]", f"игра «Мины»: поле {MINES_CELLS} клеток, от {MINES_MIN} мин, коэффициент растёт"),
-        ("дуэль СУММА (ответом)", f"дуэль на револьвере: на принятие — {DUEL_PENDING_SECONDS} сек., на выстрел — {DUEL_SHOT_SECONDS} сек."),
-        ("рулетка ТИП СУММА", f"рулетка с анимацией, выигрыш x{ROULETTE_PAYOUT}. ТИП: чет, нечет, красный, черный. Пример: рулетка чет 1кк"),
+        ("мины [ставка]", "игра «Мины»: открывайте алмазы, коэффициент растёт"),
+        ("дуэль СУММА (ответом)", "дуэль на револьвере с другим игроком"),
     ]),
     ("🎁 Бонусы и промокоды", [
         ("бонус", f"раз в час: {_n(BONUS_MONEY)} 💰 и {BONUS_EXP} exp (VIP — {_n(VIP_BONUS_MONEY)} 💰)"),
@@ -188,19 +145,17 @@ COMMAND_CATEGORIES = [
     ]),
     ("💰 Экономика", [
         ("кошелёк", "баланс, опыт и уровень"),
-        ("передать СУММА (ответом)", f"перевод игроку: от {_n(TRANSFER_MIN)} до {_n(TRANSFER_MAX)} 💰, пауза {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)"),
-        ("купить вип", f"VIP на {VIP_DAYS} дней за {_n(VIP_PRICE)} 💰: бонус {_n(VIP_BONUS_MONEY)} 💰 в час, выигрыши x{VIP_WIN_BONUS}, префикс {VIP_PREFIX}"),
+        ("передать СУММА (ответом)", f"перевод игроку: от {_n(TRANSFER_MIN)} до {_n(TRANSFER_MAX)} 💰"),
+        ("купить вип", f"VIP за {_n(VIP_PRICE)} 💰: больше бонус и префикс {VIP_PREFIX}"),
     ]),
     ("👤 Профиль и беседа", [
         ("профиль", "посмотреть свой профиль"),
-        ("префикс", "ваш префикс и уровень"),
-        ("топ", "топ дня по сообщениям или по балансу (кнопки)"),
+        ("топ", "топ дня по сообщениям"),
         ("история", "промокоды и прошлые топы"),
-        ("правила", "правила беседы"),
         ("админы", "роли беседы и кто их занимает"),
     ]),
     ("📨 Обратная связь", [
-        ("репорт", f"сообщить владельцу о баге, недоработке или идее (пауза между репортами — {REPORT_COOLDOWN} сек.)"),
+        ("репорт", "сообщить владельцу о баге, недоработке или идее"),
     ]),
 ]
 
@@ -226,16 +181,14 @@ _staff(MIN_LEVEL_TO_KICK, "бан (ответом / ID) [причина]", "ис
 _staff(MIN_LEVEL_TO_KICK, "разбан (ответом / ID)", "снять блокировку")
 _staff(MIN_LEVEL_TO_PREFIX, "префикс (ответом) НОВЫЙ", "сменить префикс участника («префикс -» — убрать)")
 _staff(MIN_LEVEL_TO_TIMEOUT, "timeout [минуты]", "режим тишины вкл/выкл: пишут только модераторы")
-_staff(MIN_LEVEL_TO_PROMO, "промокод НАЗВАНИЕ СУММА ИСПОЛЬЗОВАНИЙ", "создать промокод (с разрешения владельца). Пример: промокод Борз 1кк 1")
-_staff(MIN_LEVEL_TO_GIVE, "деньги (ответом) СУММА", "выдать деньги (с разрешения владельца). Пример: деньги 5кк")
-_staff(MIN_LEVEL_TO_GIVE, "забрать (ответом) СУММА", "забрать деньги (с разрешения владельца). Пример: забрать 5кк")
+_staff(MIN_LEVEL_TO_PROMO, "промокод НАЗВАНИЕ СУММА ИСПОЛЬЗОВАНИЙ", "создать промокод. Пример: промокод Борз 1кк 1")
+_staff(MIN_LEVEL_TO_GIVE, "деньги (ответом) СУММА", "выдать деньги. Пример: деньги 5кк")
 _staff(MIN_LEVEL_TO_GIVE, "опыт (ответом) ЧИСЛО", "выдать опыт. Пример: опыт 50")
 _staff(MIN_LEVEL_LOGS, "logs [ответом / ID] [вчера]", "логи за день вам в личные сообщения")
 # =====================================================
 
 vk_session = VkApi(token=TOKEN, api_version="5.199")
 vk = vk_session.get_api()
-vk_upload = VkUpload(vk_session)
 
 MENTION_RE = re.compile(r"\[id(\d+)\|[^\]]*\]")
 ID_RE = re.compile(r"(?:^|\s)(?:id)?(\d+)(?:\s|$)")
@@ -247,7 +200,7 @@ TIME_UNITS = {"м": 60, "m": 60, "ч": 3600, "h": 3600, "д": 86400, "d": 86400}
 # (чтобы не реагировать на фразы вроде «топ идея» или «команды бота не работают»)
 BARE_COMMANDS = {"команды", "commands", "хелп", "help", "удалить", "delete",
                  "топ", "top", "бонус", "bonus", "кошелек", "wallet",
-                 "история", "history", "репорт", "report", "правила", "rules"}
+                 "история", "history", "репорт", "report"}
 
 
 # ---------------------- Хранилища ----------------------
@@ -269,11 +222,10 @@ data = load_json(DATA_FILE)
 stats = load_json(STATS_FILE)
 economy = load_json(ECONOMY_FILE)
 punish = load_json(PUNISH_FILE)
-for _key in ("users", "promos", "games", "duels", "reports", "report_mode", "report_blocked",
-             "approvals", "roulette"):
+for _key in ("users", "promos", "games", "duels", "reports", "report_mode", "report_blocked"):
     economy.setdefault(_key, {})
 economy.setdefault("seq", {})
-for _key in ("duel", "report", "approval", "roulette"):
+for _key in ("duel", "report"):
     economy["seq"].setdefault(_key, 0)
 for _key in ("mutes", "bans", "warns", "timeouts"):
     punish.setdefault(_key, {})
@@ -404,7 +356,7 @@ def send(peer_id, text, keyboard=None):
     )
 
 
-def edit_message(peer_id, cmid, text, keyboard=None, attachment=None):
+def edit_message(peer_id, cmid, text, keyboard=None):
     """Заменяет текст и клавиатуру сообщения бота. Без keyboard — кнопки убираются."""
     params = {
         "peer_id": peer_id,
@@ -413,8 +365,6 @@ def edit_message(peer_id, cmid, text, keyboard=None, attachment=None):
         "disable_mentions": 1,
         "dont_parse_links": 1,
     }
-    if attachment:
-        params["attachment"] = attachment
     if keyboard is not None:
         vk.messages.edit(keyboard=keyboard, **params)
         return
@@ -632,8 +582,7 @@ def answer_event(ev, text=None):
     vk.messages.sendMessageEventAnswer(**params)
 
 
-PAGER_WORDS = {"admins": "админы", "help": "хелп", "history": "история", "cmds": "команды",
-               "top": "топ"}
+PAGER_WORDS = {"admins": "админы", "help": "хелп", "history": "история", "cmds": "команды"}
 
 
 def handle_callback(ev):
@@ -645,13 +594,10 @@ def handle_callback(ev):
     if cmd == "rep":                  # кнопки владельца в личных сообщениях
         handle_report_callback(ev, payload)
         return
-    if cmd == "appr":                 # разрешения владельца (деньги, промокоды)
-        handle_approval_callback(ev, payload)
-        return
     if ev["peer_id"] < CHAT_OFFSET:   # всё остальное работает только в беседах
         return
 
-    actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action, "roul": roulette_action}
+    actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action}
     if cmd in actions:
         note = None
         try:
@@ -673,7 +619,7 @@ def handle_callback(ev):
     if cmd == "help" and get_level(peer_id, user_id) < MIN_LEVEL_HELP:
         answer_event(ev, "Эта команда доступна только модераторам и выше.")
         return
-    if payload.get("n"):              # открытая вкладка / счётчик страниц
+    if payload.get("n"):              # кнопка-счётчик страниц
         answer_event(ev)
         return
 
@@ -690,7 +636,7 @@ def handle_callback(ev):
 def build_admins_page(peer_id, page, opener_id):
     if page == len(ROLES) + 1:  # вкладка VIP
         members = [int(u) for u in stats.get(str(peer_id), {})
-                   if vip_active(economy["users"].get(u, {}))]
+                   if economy["users"].get(u, {}).get("vip")]
         names = get_names(members[:20])
         lines = ["✨ VIP — участники беседы", ""]
         if members:
@@ -784,8 +730,8 @@ def build_profile(peer_id, uid):
         f"Роль в беседе: {role}",
         f"Уровень игрока: {p_lvl} — {p_name}",
     ]
-    if vip_active(user):
-        lines.append(f"✨ VIP: до {fmt_time(user['vip_until'])}")
+    if user.get("vip"):
+        lines.append("✨ VIP: активен")
 
     if st:
         count = st["n"]
@@ -837,8 +783,32 @@ def cmd_profile(msg, rest, slash):
 
 # ---------------------- «топ» ----------------------
 def cmd_top(msg, rest, slash):
-    text, kb = build_top_page(msg["peer_id"], 1, msg["from_id"])
-    send(msg["peer_id"], text, kb)
+    peer_id = msg["peer_id"]
+    counts = daily["counts"].get(str(peer_id), {})
+    if not counts:
+        send(peer_id, "🏆 Сегодня в беседе ещё никто не писал.")
+        return
+
+    ranking = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    top = ranking[:TOP_SIZE]
+    names = get_names([int(u) for u, _ in top])
+    medals = ["🥇", "🥈", "🥉"]
+
+    lines = [f"🏆 Топ дня по сообщениям ({fmt_day(daily['day'])})", ""]
+    for i, (uid, n) in enumerate(top):
+        prefix = medals[i] if i < 3 else f"{i + 1}."
+        lines.append(f"{prefix} {mention(int(uid), names)} — {fmt_num(n)}")
+
+    me = str(msg["from_id"])
+    place = next((i for i, (u, _) in enumerate(ranking, 1) if u == me), None)
+    if place and place > TOP_SIZE:
+        lines += ["", f"Ваше место: {place} ({fmt_num(counts[me])})"]
+    lines += [
+        "",
+        f"Награда после окончания дня: 🥇 {TOP_REWARDS[0]} exp, 🥈 {TOP_REWARDS[1]} exp, 🥉 {TOP_REWARDS[2]} exp",
+        "Прошлые топы — команда «история».",
+    ]
+    send(peer_id, "\n".join(lines))
 
 
 # ---------------------- «бонус» и «кошелёк» ----------------------
@@ -853,7 +823,7 @@ def cmd_bonus(msg, rest, slash):
         send(peer_id, f"⏳ Следующий бонус можно получить через {fmt_duration(left)}.")
         return
 
-    vip = vip_active(user)
+    vip = bool(user.get("vip"))
     money = VIP_BONUS_MONEY if vip else BONUS_MONEY
     user["money"] += money
     user["last_bonus"] = now
@@ -884,8 +854,8 @@ def cmd_wallet(msg, rest, slash):
     ]
     if user["exp"] < PLAYER_LEVELS[-1][3]:
         lines.append(f"До следующего уровня: {hi - user['exp']} exp (награда: +{fmt_num(LEVEL_UP_REWARD)} 💰)")
-    if vip_active(user):
-        lines.append(f"✨ VIP: до {fmt_time(user['vip_until'])}")
+    if user.get("vip"):
+        lines.append(f"✨ VIP: активен ({VIP_PREFIX})")
     send(msg["peer_id"], "\n".join(lines))
 
 
@@ -955,38 +925,28 @@ def cmd_promo(msg, rest, slash):
         if get_level(peer_id, uid) < MIN_LEVEL_TO_PROMO:
             send(peer_id, f"⛔ Создавать промокоды могут {ROLES[MIN_LEVEL_TO_PROMO]} и выше.")
             return
-        names = get_names([uid])
-        submit_action(peer_id, uid, "promo", {"name": name, "amount": amount, "uses": int(uses_text)},
-                      f"создать промокод «{name}»: {fmt_num(amount)} 💰 × {uses_text} использ.")
+        create_promo(peer_id, uid, name, amount, int(uses_text))
     elif slash or (len(args) == 2 and get_level(peer_id, uid) >= MIN_LEVEL_TO_PROMO):
         send(peer_id, create_usage)
 
 
 # ---------------------- Игра «Мины» ----------------------
-MINES_KEYCAPS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟",
-                 "⓫", "⓬", "⓭", "⓮", "⓯"]
+MINES_KEYCAPS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
 
-def mines_coef(mines, opened, vip=False):
-    """Коэффициент после `opened` открытых алмазов: 1/вероятность × (1 − комиссия). VIP — ещё ×VIP_WIN_BONUS."""
+def mines_coef(mines, opened):
+    """Коэффициент после `opened` открытых алмазов: 1/вероятность угадать × (1 − комиссия)."""
     if opened <= 0:
         return 1.0
     p = 1.0
     for i in range(opened):
         p *= (MINES_CELLS - mines - i) / (MINES_CELLS - i)
-    coef = (1 - MINES_HOUSE_EDGE) / p
-    if vip:
-        coef *= VIP_WIN_BONUS
-    return round(coef, 2)
-
-
-def mines_vip(game):
-    return vip_active(get_user(game["owner"]))
+    return round((1 - MINES_HOUSE_EDGE) / p, 2)
 
 
 def mines_payout(game):
     """Выплата = ставка × коэффициент (без ошибок округления float)."""
-    coef = mines_coef(game["m"], len(game["opened"]), mines_vip(game))
+    coef = mines_coef(game["m"], len(game["opened"]))
     return int(Decimal(game["bet"]) * Decimal(str(coef)))
 
 
@@ -1001,7 +961,8 @@ def mines_grid(game, reveal=False, hit=None):
             cells.append("⬜")
         else:
             cells.append(MINES_KEYCAPS[i])
-    return "\n".join(" ".join(cells[r:r + MINES_ROW]) for r in range(0, MINES_CELLS, MINES_ROW))
+    half = MINES_CELLS // 2
+    return "\n".join(" ".join(cells[r:r + half]) for r in range(0, MINES_CELLS, half))
 
 
 def mines_bet_page(uid):
@@ -1020,20 +981,19 @@ def mines_pick_page(bet, uid):
             "Чем больше мин и чем больше алмазов 💎 вы откроете — тем выше коэффициент.")
     kb = VkKeyboard(inline=True)
     for i, m in enumerate(range(MINES_MIN, MINES_MAX + 1)):
-        if i and i % MINES_ROW == 0:
+        if i and i % 4 == 0:
             kb.add_line()
         kb.add_callback_button(f"{m} 💣", VkKeyboardColor.SECONDARY,
                                payload={"cmd": "mines", "act": "start", "b": bet, "m": m, "o": uid})
     return text, kb.get_keyboard()
 
 
-def mines_game_page(game, pg=0):
-    vip = mines_vip(game)
+def mines_game_page(game):
     opened = len(game["opened"])
-    coef = mines_coef(game["m"], opened, vip)
+    coef = mines_coef(game["m"], opened)
     lines = [
-        "💣 Мины" + (" ✨ VIP" if vip else ""),
-        f"Ставка: {fmt_num(game['bet'])} 💰 | Мин: {game['m']} из {MINES_CELLS} клеток",
+        "💣 Мины",
+        f"Ставка: {fmt_num(game['bet'])} 💰 | Мин: {game['m']}",
         "",
         mines_grid(game),
         "",
@@ -1041,37 +1001,28 @@ def mines_game_page(game, pg=0):
     ]
     if opened:
         lines.append(f"Выигрыш сейчас: {fmt_num(mines_payout(game))} 💰")
-    lines.append(f"Следующий алмаз: x{mines_coef(game['m'], opened + 1, vip):.2f}")
-
-    # В inline-клавиатуре VK максимум 10 кнопок: клетки показываем по MINES_PAGE штук, остальные — кнопкой «Клетки»
-    closed = [i for i in range(MINES_CELLS) if i not in game["opened"]]
-    pages = (len(closed) + MINES_PAGE - 1) // MINES_PAGE
-    pg = min(max(pg, 0), pages - 1)
-    shown = closed[pg * MINES_PAGE:(pg + 1) * MINES_PAGE]
-    if pages > 1:
-        lines.append(f"Клетки {pg + 1}/{pages}: нажмите «Другие клетки», чтобы увидеть остальные")
+    lines.append(f"Следующий алмаз: x{mines_coef(game['m'], opened + 1):.2f}")
 
     kb = VkKeyboard(inline=True)
-    for idx, i in enumerate(shown):
-        if idx and idx % MINES_ROW == 0:
+    placed = 0
+    for i in range(MINES_CELLS):
+        if i in game["opened"]:
+            continue  # открытые клетки видны в тексте, кнопка не нужна
+        if placed and placed % 5 == 0:
             kb.add_line()
         kb.add_callback_button(str(i + 1), VkKeyboardColor.SECONDARY,
-                               payload={"cmd": "mines", "act": "open", "c": i, "pg": pg, "o": game["owner"]})
-    if pages > 1 or opened:
-        kb.add_line()
-    if pages > 1:
-        kb.add_callback_button("Другие клетки ▶", VkKeyboardColor.PRIMARY,
-                               payload={"cmd": "mines", "act": "pg", "pg": (pg + 1) % pages, "o": game["owner"]})
+                               payload={"cmd": "mines", "act": "open", "c": i, "o": game["owner"]})
+        placed += 1
     if opened:
+        kb.add_line()
         kb.add_callback_button("💰 Забрать", VkKeyboardColor.POSITIVE,
                                payload={"cmd": "mines", "act": "cash", "o": game["owner"]})
     return "\n".join(lines), kb.get_keyboard()
 
 
 def mines_final_text(game, user, head, hit=None, win=0):
-    vip = mines_vip(game)
-    coef = mines_coef(game["m"], len(game["opened"]), vip)
-    lines = ["💣 Мины" + (" ✨ VIP" if vip else ""), head, "", mines_grid(game, reveal=True, hit=hit), ""]
+    coef = mines_coef(game["m"], len(game["opened"]))
+    lines = ["💣 Мины", head, "", mines_grid(game, reveal=True, hit=hit), ""]
     if win:
         lines += [f"Коэффициент: x{coef:.2f}", f"Выигрыш: +{fmt_num(win)} 💰"]
     else:
@@ -1173,16 +1124,10 @@ def mines_action(ev, p):
         return None
 
     game = games.get(key)
-    if not game or "mines" not in game:
+    if not game:
         return "Игра не найдена."
     if game["done"]:
         return "Игра уже завершена."
-    pg = int(p.get("pg", 0))
-
-    if act == "pg":  # другие клетки
-        text, kb = mines_game_page(game, pg)
-        edit_message(peer_id, cmid, text, kb)
-        return None
 
     if act == "open":
         cell = int(p.get("c", -1))
@@ -1207,7 +1152,7 @@ def mines_action(ev, p):
             return None
 
         save_economy()
-        text, kb = mines_game_page(game, pg)
+        text, kb = mines_game_page(game)
         edit_message(peer_id, cmid, text, kb)
         return None
 
@@ -1533,11 +1478,7 @@ def add_exp(uid, amount):
 
 
 def get_prefix(uid):
-    user = economy["users"].get(str(uid))
-    if not user:
-        return ""
-    vip_active(user)  # заодно снимет просроченный VIP-префикс
-    return user.get("prefix", "")
+    return economy["users"].get(str(uid), {}).get("prefix", "")
 
 
 def sanitize_prefix(text):
@@ -1556,10 +1497,7 @@ def vip_benefits():
     return (
         f"• Бонус каждый час: {fmt_num(VIP_BONUS_MONEY)} 💰 (вместо {fmt_num(BONUS_MONEY)})\n"
         f"• Опыт каждый час: {BONUS_EXP} exp\n"
-        f"• Выигрыши в играх x{VIP_WIN_BONUS} (например, 2x → {2 * VIP_WIN_BONUS:g}x)\n"
-        "• Переводы денег без паузы\n"
-        f"• Префикс {VIP_PREFIX} рядом с именем\n"
-        f"• Срок действия: {VIP_DAYS} дней"
+        f"• Префикс {VIP_PREFIX} рядом с вашим именем"
     )
 
 
@@ -1573,26 +1511,19 @@ def cmd_buy(msg, rest, slash):
         return
 
     user = get_user(uid)
-    active = vip_active(user)
-    if active:
-        head = (f"✨ Продление VIP\nСейчас действует до {fmt_time(user['vip_until'])}\n"
-                f"Продление: +{VIP_DAYS} дней")
-        question = "Вы точно хотите продлить услугу VIP?"
-        button = "✅ Продлить"
-    else:
-        head = "✨ Услуга VIP"
-        question = "Вы точно хотите приобрести услугу VIP?"
-        button = "✅ Купить"
+    if user.get("vip"):
+        send(peer_id, f"✨ У вас уже есть VIP.\n\nПреимущества VIP:\n{vip_benefits()}")
+        return
 
     kb = VkKeyboard(inline=True)
-    kb.add_callback_button(button, VkKeyboardColor.POSITIVE, {"cmd": "vip", "act": "yes", "o": uid})
+    kb.add_callback_button("✅ Купить", VkKeyboardColor.POSITIVE, {"cmd": "vip", "act": "yes", "o": uid})
     kb.add_callback_button("❌ Отмена", VkKeyboardColor.NEGATIVE, {"cmd": "vip", "act": "no", "o": uid})
     send(peer_id,
-         f"{head}\n"
-         f"Цена: {fmt_num(VIP_PRICE)} 💰 на {VIP_DAYS} дней\n"
+         f"✨ Услуга VIP\n"
+         f"Цена: {fmt_num(VIP_PRICE)} 💰\n"
          f"Ваш баланс: {fmt_num(user['money'])} 💰\n\n"
          f"Преимущества VIP:\n{vip_benefits()}\n\n"
-         f"{question}",
+         f"Вы точно хотите приобрести услугу VIP?",
          kb.get_keyboard())
 
 
@@ -1601,29 +1532,22 @@ def vip_action(ev, p):
     if uid != p.get("o"):
         return "Это окно открыл другой участник."
     peer_id, cmid = ev["peer_id"], ev["conversation_message_id"]
-    key = f"vip:{peer_id}:{cmid}"
-    if key in economy["games"]:
-        return "Покупка уже оформлена."
     user = get_user(uid)
+    if user.get("vip"):
+        return "VIP уже куплен."
     if p.get("act") == "no":
-        economy["games"][key] = {"t": int(time.time()), "done": True, "owner": uid}
         edit_message(peer_id, cmid, "❌ Покупка VIP отменена.")
         return None
     if user["money"] < VIP_PRICE:
         return f"Не хватает {fmt_num(VIP_PRICE - user['money'])} 💰"
 
-    now = time.time()
-    base = user["vip_until"] if vip_active(user) else now
     user["money"] -= VIP_PRICE
     user["vip"] = True
-    user["vip_until"] = base + VIP_DAYS * 86400
-    if user.get("prefix", "") in ("", "VIP✨", VIP_PREFIX):
-        user["prefix"] = VIP_PREFIX
-    economy["games"][key] = {"t": int(now), "done": True, "owner": uid}
+    user["prefix"] = VIP_PREFIX
     save_economy()
     log_action(peer_id, uid, f"купил VIP за {VIP_PRICE}")
     edit_message(peer_id, cmid,
-                 f"✅ Поздравляем! VIP ✨ активен до {fmt_time(user['vip_until'])}\n\n"
+                 f"✅ Поздравляем, вы приобрели VIP! ✨\n\n"
                  f"Списано: {fmt_num(VIP_PRICE)} 💰\n"
                  f"Ваш баланс: {fmt_num(user['money'])} 💰\n\n"
                  f"Преимущества VIP:\n{vip_benefits()}")
@@ -1633,10 +1557,6 @@ def vip_action(ev, p):
 def cmd_prefix(msg, rest, slash):
     peer_id = msg["peer_id"]
     actor = msg["from_id"]
-    # «префикс» без аргументов — показать свой префикс и уровень (для всех)
-    if not rest.strip() and not msg.get("reply_message") and not msg.get("fwd_messages"):
-        show_own_prefix(msg)
-        return
     level = get_level(peer_id, actor)
     if level < MIN_LEVEL_TO_PREFIX:
         deny(msg, rest, slash, f"⛔ Менять префикс могут {ROLES[MIN_LEVEL_TO_PREFIX]} и выше.")
@@ -1697,9 +1617,13 @@ def cmd_give_money(msg, rest, slash):
         send(peer_id, f"⚠ Максимум за раз: {fmt_num(MAX_GRANT)} 💰")
         return
 
+    user = get_user(target)
+    user["money"] += amount
+    save_economy()
+    log_action(peer_id, actor, f"выдал деньги {amount} → {target}")
     names = get_names([target])
-    summary = f"выдать деньги: {fmt_num(amount)} 💰 → {mention(target, names)}"
-    submit_action(peer_id, actor, "give", {"target": target, "amount": amount}, summary)
+    send(peer_id, f"💰 {mention(target, names)} получил {fmt_num(amount)} 💰\n"
+                  f"Баланс: {fmt_num(user['money'])} 💰")
 
 
 def cmd_give_exp(msg, rest, slash):
@@ -1737,8 +1661,7 @@ def cmd_transfer(msg, rest, slash):
     uid = msg["from_id"]
     usage = (f"ℹ Использование: передать СУММА — ответом на сообщение участника\n"
              f"Или: передать ID СУММА\n"
-             f"Сумма: от {fmt_num(TRANSFER_MIN)} до {fmt_num(TRANSFER_MAX)} 💰\n"
-             f"Пауза между переводами: {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)")
+             f"Сумма: от {fmt_num(TRANSFER_MIN)} до {fmt_num(TRANSFER_MAX)} 💰")
     target, tail = parse_target(msg, rest)
     if target is None:
         no_target(msg, rest, slash, usage)
@@ -1759,20 +1682,12 @@ def cmd_transfer(msg, rest, slash):
         return
 
     sender = get_user(uid)
-    now = time.time()
-    if not vip_active(sender):
-        left = sender.get("last_transfer", 0) + TRANSFER_COOLDOWN - now
-        if left > 0:
-            send(peer_id, f"⏳ Следующий перевод через {fmt_duration(left)}. "
-                          "У VIP-игроков паузы нет — «купить вип».")
-            return
     if sender["money"] < amount:
         send(peer_id, f"⚠ Недостаточно денег. Ваш баланс: {fmt_num(sender['money'])} 💰")
         return
     receiver = get_user(target)
     sender["money"] -= amount
     receiver["money"] += amount
-    sender["last_transfer"] = now
     save_economy()
     log_action(peer_id, uid, f"передал {amount} → {target}")
     names = get_names([uid, target])
@@ -1816,22 +1731,21 @@ def cmd_duel(msg, rest, slash):
     prune_duels()
     economy["seq"]["duel"] += 1
     did = economy["seq"]["duel"]
-    duel = {"id": did, "a": uid, "b": target, "bet": amount, "status": "pending",
-            "t": int(time.time()), "peer": peer_id, "cmid": None}
-    economy["duels"][str(did)] = duel
+    economy["duels"][str(did)] = {
+        "id": did, "a": uid, "b": target, "bet": amount,
+        "status": "pending", "t": int(time.time()),
+    }
+    save_economy()
 
     names = get_names([uid, target])
     kb = VkKeyboard(inline=True)
     kb.add_callback_button("✅ Принять", VkKeyboardColor.POSITIVE, {"cmd": "duel", "act": "acc", "id": did})
     kb.add_callback_button("❌ Отклонить", VkKeyboardColor.NEGATIVE, {"cmd": "duel", "act": "dec", "id": did})
-    duel["cmid"] = send_get_cmid(
-        peer_id,
-        f"🔫 Дуэль!\n{mention(uid, names)} вызывает {mention(target, names)} на дуэль.\n"
-        f"Ставка: {fmt_num(amount)} 💰 с каждого (банк: {fmt_num(amount * 2)} 💰)\n\n"
-        f"{mention(target, names)}, у вас {DUEL_PENDING_SECONDS} сек., чтобы принять вызов.\n"
-        f"После принятия на выстрел даётся {DUEL_SHOT_SECONDS} сек.",
-        kb.get_keyboard())
-    save_economy()
+    send(peer_id,
+         f"🔫 Дуэль!\n{mention(uid, names)} вызывает {mention(target, names)} на дуэль.\n"
+         f"Ставка: {fmt_num(amount)} 💰 с каждого (банк: {fmt_num(amount * 2)} 💰)\n\n"
+         f"{mention(target, names)}, вы принимаете вызов? (вызов действует {DUEL_PENDING_SECONDS // 60} мин)",
+         kb.get_keyboard())
 
 
 def duel_page(duel, event_line=""):
@@ -1845,8 +1759,7 @@ def duel_page(duel, event_line=""):
     ]
     if event_line:
         lines += ["", event_line]
-    lines += ["", f"Ход: {mention(duel['turn'], names)} — нажмите «Выстрелить».",
-              f"⏱ На выстрел — {DUEL_SHOT_SECONDS} сек., иначе победа соперника."]
+    lines += ["", f"Ход: {mention(duel['turn'], names)} — нажмите «Выстрелить»."]
     kb = VkKeyboard(inline=True)
     kb.add_callback_button("🔫 Выстрелить", VkKeyboardColor.NEGATIVE,
                            {"cmd": "duel", "act": "shoot", "id": duel["id"]})
@@ -1862,13 +1775,12 @@ def duel_action(ev, p):
         return "Дуэль уже завершена."
     act = p.get("act")
     a_id, b_id, bet = duel["a"], duel["b"], duel["bet"]
-    duel["peer"], duel["cmid"] = peer_id, cmid
 
     if duel["status"] == "pending":
         if time.time() - duel["t"] > DUEL_PENDING_SECONDS:
             duel["status"] = "done"
             save_economy()
-            edit_message(peer_id, cmid, f"⌛ Вызов на дуэль истёк: соперник не ответил за {DUEL_PENDING_SECONDS} сек.")
+            edit_message(peer_id, cmid, "⌛ Вызов на дуэль устарел.")
             return None
         if act == "dec":
             if uid not in (a_id, b_id):
@@ -1894,22 +1806,18 @@ def duel_action(ev, p):
             barrel = [True] * bullets + [False] * (DUEL_CHAMBERS - bullets)
             random.shuffle(barrel)
             duel.update(status="active", barrel=barrel, pos=0, bullets=bullets,
-                        turn=random.choice([a_id, b_id]),
-                        deadline=time.time() + DUEL_SHOT_SECONDS)
+                        turn=random.choice([a_id, b_id]))
             save_economy()
             names = get_names([duel["turn"]])
             text, kb = duel_page(duel, f"🎲 Жребий: первым стреляет {mention(duel['turn'], names)}")
             edit_message(peer_id, cmid, text, kb)
         return None
 
-    # Дуэль идёт: стрелять может только тот, чей сейчас ход, и только в пределах времени
+    # Дуэль идёт: стрелять может только тот, чей сейчас ход
     if act != "shoot":
         return None
     if uid not in (a_id, b_id):
         return "Вы не участвуете в этой дуэли."
-    if time.time() > duel.get("deadline", 0):
-        duel_forfeit(duel)
-        return "Время на выстрел вышло."
     if uid != duel["turn"]:
         return "Сейчас не ваш ход."
 
@@ -1929,7 +1837,6 @@ def duel_action(ev, p):
         return None
 
     duel["turn"] = b_id if uid == a_id else a_id
-    duel["deadline"] = time.time() + DUEL_SHOT_SECONDS
     save_economy()
     text, kb = duel_page(duel, f"💨 Осечка! {mention(uid, names)} промахнулся.")
     edit_message(peer_id, cmid, text, kb)
@@ -2215,8 +2122,7 @@ def cmd_report(msg, rest, slash):
          f"Если владельцу понравится ваша идея, вы получите награду: +{REPORT_REWARD_EXP} exp и "
          f"+{fmt_num(REPORT_REWARD_MONEY)} 💰\n\n"
          "⚠ Бесполезный флуд — кик/бан.\n"
-         f"Отправить репорт можно в течение {REPORT_WINDOW // 60} мин. "
-         f"Между репортами пауза {REPORT_COOLDOWN} сек.")
+         f"Отправить репорт можно в течение {REPORT_WINDOW // 60} мин.")
 
 
 def handle_dm(msg):
@@ -2243,13 +2149,6 @@ def handle_dm(msg):
     if not text:
         send(peer_id, "⚠ Отправьте репорт текстом.")
         return
-
-    user = get_user(uid)
-    left = user.get("last_report", 0) + REPORT_COOLDOWN - time.time()
-    if left > 0:
-        send(peer_id, f"⏳ Следующий репорт можно отправить через {fmt_duration(left)}.")
-        return
-    user["last_report"] = time.time()
 
     economy["seq"]["report"] += 1
     rid = economy["seq"]["report"]
@@ -2442,606 +2341,9 @@ def cmd_logs(msg, rest, slash):
     send(peer_id, "📨 Логи отправлены вам в личные сообщения.")
 
 
-# ---------------------- Таймеры (дуэли, рулетка) ----------------------
-# Все обработчики и таймер работают под одной блокировкой, чтобы данные не перемешались.
-LOCK = threading.RLock()
-
-
-def tick_loop():
-    """Раз в секунду проверяет: не истекли ли вызовы и ходы в дуэлях, не пора ли объявить итог рулетки."""
-    while True:
-        time.sleep(1)
-        try:
-            with LOCK:
-                check_duel_timers()
-                check_roulette_reveals()
-        except Exception as e:
-            print(f"Ошибка таймера: {e!r}")
-
-
-def send_get_cmid(peer_id, text, keyboard=None, attachment=None):
-    """Отправляет сообщение и возвращает его conversation_message_id (чтобы потом редактировать)."""
-    res = vk.messages.send(
-        peer_ids=peer_id,
-        message=text,
-        keyboard=keyboard,
-        attachment=attachment,
-        random_id=get_random_id(),
-        disable_mentions=1,
-        dont_parse_links=1,
-    )
-    try:
-        return res[0].get("conversation_message_id")
-    except Exception:
-        return None
-
-
-# ---------------------- VIP: срок действия и коэффициент ----------------------
-def vip_active(user):
-    """VIP действует VIP_DAYS дней. Просроченный VIP снимается вместе с VIP-префиксом."""
-    now = time.time()
-    if user.get("vip") and "vip_until" not in user:   # VIP из старой версии бота
-        user["vip_until"] = now + VIP_DAYS * 86400
-    if user.get("vip_until", 0) > now:
-        if user.get("prefix") == "VIP✨":             # старый вид префикса
-            user["prefix"] = VIP_PREFIX
-        return True
-    if user.get("vip"):
-        user["vip"] = False
-        if user.get("prefix") in (VIP_PREFIX, "VIP✨"):
-            user.pop("prefix", None)
-    return False
-
-
-def win_mult(uid):
-    """Во сколько раз VIP увеличивает коэффициент выигрыша (2x → 2.5x)."""
-    return VIP_WIN_BONUS if vip_active(get_user(uid)) else 1.0
-
-
-def show_own_prefix(msg):
-    peer_id = msg["peer_id"]
-    uid = msg["from_id"]
-    user = get_user(uid)
-    active = vip_active(user)
-    lvl, name, _, _ = player_level(user["exp"])
-    role = ROLES.get(get_level(peer_id, uid), "Участник")
-    lines = [
-        "🏷 Ваш префикс",
-        "",
-        f"Префикс: {user.get('prefix') or 'нет'}",
-        f"Уровень: {lvl} — {name}",
-        f"Опыт: {exp_text(user['exp'])}",
-        f"Роль в беседе: {role}",
-    ]
-    if active:
-        lines.append(f"✨ VIP до {fmt_time(user['vip_until'])}")
-    else:
-        lines += ["", f"Красивый префикс {VIP_PREFIX} даёт VIP — команда «купить вип»."]
-    send(peer_id, "\n".join(lines))
-
-
-# ---------------------- Правила беседы ----------------------
-def cmd_rules(msg, rest, slash):
-    lines = ["📜 Правила беседы", ""]
-    lines += [f"{i}. {rule}" for i, rule in enumerate(CHAT_RULES, 1)]
-    send(msg["peer_id"], "\n".join(lines))
-
-
-# ---------------------- Деньги от Тех специалистов: разрешение владельца ----------------------
-def request_approval(peer_id, actor, kind, data, summary):
-    """Тех специалист хочет выдать/забрать деньги или создать промокод: спрашиваем владельца в ЛС."""
-    economy["seq"]["approval"] += 1
-    aid = economy["seq"]["approval"]
-    economy["approvals"][str(aid)] = {
-        "id": aid, "kind": kind, "peer": peer_id, "actor": actor,
-        "data": data, "summary": summary, "status": "pending", "t": int(time.time()),
-    }
-    save_economy()
-
-    names = get_names([actor])
-    kb = VkKeyboard(inline=True)
-    kb.add_callback_button("✅ Разрешить", VkKeyboardColor.POSITIVE, {"cmd": "appr", "a": "ok", "id": aid})
-    kb.add_callback_button("⛔ Запретить", VkKeyboardColor.NEGATIVE, {"cmd": "appr", "a": "no", "id": aid})
-    try:
-        send(OWNER_ID,
-             f"🔐 Запрос на действие\n"
-             f"Тех: {mention(actor, names)} (id{actor})\n"
-             f"Действие: {summary}\n"
-             f"Беседа: #{peer_id - CHAT_OFFSET}",
-             kb.get_keyboard())
-    except Exception as e:
-        print(f"Не удалось отправить запрос владельцу: {e!r}")
-        economy["approvals"][str(aid)]["status"] = "failed"
-        save_economy()
-        send(peer_id, "❌ Не удалось отправить запрос владельцу. "
-                      "Владелец должен один раз написать боту в личные сообщения.")
-        return
-    send(peer_id, "⏳ Запрос отправлен владельцу на подтверждение. Действие выполнится после его «Разрешить».")
-
-
-def do_give_money(peer_id, actor, target, amount):
-    user = get_user(target)
-    user["money"] += amount
-    save_economy()
-    log_action(peer_id, actor, f"выдал деньги {amount} → {target}")
-    names = get_names([target])
-    send(peer_id, f"💰 {mention(target, names)} получил {fmt_num(amount)} 💰\n"
-                  f"Баланс: {fmt_num(user['money'])} 💰")
-
-
-def do_take_money(peer_id, actor, target, amount):
-    user = get_user(target)
-    take = min(amount, user["money"])
-    names = get_names([target])
-    if take <= 0:
-        send(peer_id, f"⚠ У {mention(target, names)} нет денег — забирать нечего.")
-        return
-    user["money"] -= take
-    save_economy()
-    log_action(peer_id, actor, f"забрал деньги {take} у {target}")
-    send(peer_id, f"💸 У {mention(target, names)} забрано {fmt_num(take)} 💰\n"
-                  f"Баланс: {fmt_num(user['money'])} 💰")
-
-
-def execute_action(kind, peer_id, actor, d):
-    if kind == "give":
-        do_give_money(peer_id, actor, d["target"], d["amount"])
-    elif kind == "take":
-        do_take_money(peer_id, actor, d["target"], d["amount"])
-    elif kind == "promo":
-        create_promo(peer_id, actor, d["name"], d["amount"], d["uses"])
-
-
-def submit_action(peer_id, actor, kind, data, summary):
-    """Владелец действует сразу, Тех специалист — только с разрешения владельца."""
-    if actor == OWNER_ID:
-        execute_action(kind, peer_id, actor, data)
-    else:
-        request_approval(peer_id, actor, kind, data, summary)
-
-
-def approval_action(ev, p):
-    appr = economy["approvals"].get(str(p.get("id")))
-    if not appr:
-        return "Запрос не найден."
-    if appr["status"] != "pending":
-        return "Запрос уже обработан."
-
-    ok = p.get("a") == "ok"
-    appr["status"] = "approved" if ok else "denied"
-    save_economy()
-
-    actor = appr["actor"]
-    names = get_names([actor])
-    edit_message(ev["peer_id"], ev["conversation_message_id"],
-                 f"🔐 Запрос на действие\nТех: {mention(actor, names)} (id{actor})\n"
-                 f"Действие: {appr['summary']}\n\n{'✅ Разрешено' if ok else '⛔ Запрещено'}")
-    if ok:
-        execute_action(appr["kind"], appr["peer"], actor, appr["data"])
-    else:
-        send(appr["peer"], f"⛔ Владелец запретил действие Теха {mention(actor, names)}: {appr['summary']}")
-    return None
-
-
-def handle_approval_callback(ev, p):
-    note = None
-    try:
-        if ev["user_id"] != OWNER_ID:
-            note = "Это действие доступно только владельцу."
-        else:
-            note = approval_action(ev, p)
-    finally:
-        answer_event(ev, note)
-
-
-def cmd_take_money(msg, rest, slash):
-    peer_id = msg["peer_id"]
-    actor = msg["from_id"]
-    if get_level(peer_id, actor) < MIN_LEVEL_TO_GIVE:
-        deny(msg, rest, slash, f"⛔ Забирать деньги могут {ROLES[MIN_LEVEL_TO_GIVE]} и выше.")
-        return
-
-    usage = ("ℹ Использование: забрать СУММА — ответом на сообщение участника\n"
-             "Или: забрать ID СУММА / забрать @упоминание СУММА\nПример: забрать 5кк (или забрать все)")
-    target, tail = parse_target(msg, rest)
-    if target is None:
-        no_target(msg, rest, slash, usage)
-        return
-    if target <= 0:
-        send(peer_id, usage)
-        return
-    balance = get_user(target)["money"]
-    parts = tail.split()
-    amount = parse_amount(parts[0], balance) if parts else None
-    if amount is None:
-        send(peer_id, usage)
-        return
-    names = get_names([target])
-    if amount > balance:
-        send(peer_id, f"⚠ У {mention(target, names)} только {fmt_num(balance)} 💰")
-        return
-    summary = f"забрать деньги: {fmt_num(amount)} 💰 у {mention(target, names)}"
-    submit_action(peer_id, actor, "take", {"target": target, "amount": amount}, summary)
-
-
-# ---------------------- Топ: сообщения / баланс ----------------------
-def top_tabs_keyboard(page, opener_id):
-    kb = VkKeyboard(inline=True)
-    for i, label in ((1, "💬 Топ сообщения"), (2, "💰 Топ баланс")):
-        current = i == page
-        payload = {"cmd": "top", "p": i, "o": opener_id}
-        if current:
-            payload["n"] = 1  # нажатие на открытую вкладку ничего не меняет
-        kb.add_callback_button(("✔ " if current else "") + label,
-                               VkKeyboardColor.POSITIVE if current else VkKeyboardColor.PRIMARY,
-                               payload)
-    return kb.get_keyboard()
-
-
-def build_top_page(peer_id, page, opener_id):
-    medals = ["🥇", "🥈", "🥉"]
-    me = str(opener_id)
-
-    if page == 2:  # топ по балансу среди участников этой беседы
-        members = list(stats.get(str(peer_id), {}).keys())
-        ranking = sorted(((u, economy["users"].get(u, {}).get("money", 0)) for u in members),
-                         key=lambda kv: kv[1], reverse=True)
-        ranking = [kv for kv in ranking if kv[1] > 0]
-        if not ranking:
-            return "💰 Топ по балансу пока пуст — получите «бонус».", top_tabs_keyboard(page, opener_id)
-        top = ranking[:TOP_SIZE]
-        names = get_names([int(u) for u, _ in top])
-        lines = ["🏆 Топ беседы по балансу", ""]
-        for i, (uid, money) in enumerate(top):
-            prefix = medals[i] if i < 3 else f"{i + 1}."
-            lines.append(f"{prefix} {mention(int(uid), names)} — {fmt_num(money)} 💰")
-        place = next((i for i, (u, _) in enumerate(ranking, 1) if u == me), None)
-        if place and place > TOP_SIZE:
-            lines += ["", f"Ваше место: {place} ({fmt_num(economy['users'][me]['money'])} 💰)"]
-        return "\n".join(lines), top_tabs_keyboard(page, opener_id)
-
-    counts = daily["counts"].get(str(peer_id), {})
-    if not counts:
-        return "🏆 Сегодня в беседе ещё никто не писал.", top_tabs_keyboard(page, opener_id)
-    ranking = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
-    top = ranking[:TOP_SIZE]
-    names = get_names([int(u) for u, _ in top])
-    lines = [f"🏆 Топ дня по сообщениям ({fmt_day(daily['day'])})", ""]
-    for i, (uid, n) in enumerate(top):
-        prefix = medals[i] if i < 3 else f"{i + 1}."
-        lines.append(f"{prefix} {mention(int(uid), names)} — {fmt_num(n)}")
-    place = next((i for i, (u, _) in enumerate(ranking, 1) if u == me), None)
-    if place and place > TOP_SIZE:
-        lines += ["", f"Ваше место: {place} ({fmt_num(counts[me])})"]
-    lines += [
-        "",
-        f"Награда после окончания дня: 🥇 {TOP_REWARDS[0]} exp, 🥈 {TOP_REWARDS[1]} exp, 🥉 {TOP_REWARDS[2]} exp",
-        "Прошлые топы — команда «история».",
-    ]
-    return "\n".join(lines), top_tabs_keyboard(page, opener_id)
-
-
-# ---------------------- Дуэль: таймеры ----------------------
-def duel_send_or_edit(duel, text, kb=None):
-    if duel.get("cmid"):
-        edit_message(duel["peer"], duel["cmid"], text, kb)
-    else:
-        send(duel["peer"], text, kb)
-
-
-def duel_forfeit(duel):
-    """Игрок не успел выстрелить за DUEL_SHOT_SECONDS — победа соперника."""
-    loser = duel["turn"]
-    winner = duel["b"] if loser == duel["a"] else duel["a"]
-    duel["status"] = "done"
-    get_user(winner)["money"] += duel["bet"] * 2
-    save_economy()
-    log_action(duel["peer"], winner, f"выиграл дуэль {duel['bet'] * 2} (соперник не успел)")
-    names = get_names([loser, winner])
-    duel_send_or_edit(
-        duel,
-        f"🔫 Дуэль: {mention(duel['a'], names)} ⚔ {mention(duel['b'], names)}\n\n"
-        f"⌛ {mention(loser, names)} не успел выстрелить за {DUEL_SHOT_SECONDS} сек.\n"
-        f"Победа присуждается {mention(winner, names)}!\n"
-        f"Выигрыш: +{fmt_num(duel['bet'] * 2)} 💰")
-
-
-def check_duel_timers():
-    now = time.time()
-    for duel in list(economy["duels"].values()):
-        if duel["status"] == "done":
-            continue
-        if not duel.get("peer"):  # дуэль из старой версии бота: возвращаем ставки
-            if duel["status"] == "active":
-                get_user(duel["a"])["money"] += duel["bet"]
-                get_user(duel["b"])["money"] += duel["bet"]
-            duel["status"] = "done"
-            save_economy()
-            continue
-        if duel["status"] == "pending" and now - duel["t"] > DUEL_PENDING_SECONDS:
-            duel["status"] = "done"
-            save_economy()
-            names = get_names([duel["b"]])
-            duel_send_or_edit(duel, f"⌛ Вызов на дуэль истёк: {mention(duel['b'], names)} "
-                                    f"не ответил за {DUEL_PENDING_SECONDS} сек.")
-        elif duel["status"] == "active" and now > duel.get("deadline", now + 1):
-            duel_forfeit(duel)
-
-
-# ---------------------- Рулетка (с анимированной гифкой) ----------------------
-_wheel_cache = {}
-
-
-def _font(size):
-    from PIL import ImageFont
-    for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",
-                 "LiberationSans-Bold.ttf", "FreeSansBold.ttf"):
-        try:
-            return ImageFont.truetype(name, size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
-def build_wheel_base():
-    """Рисует колесо европейской рулетки (37 карманов, цифры по порядку) в золотом ободе."""
-    from PIL import Image, ImageDraw
-    S, c = 1040, 520
-    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    gold = (212, 168, 42, 255)
-    d.ellipse((c - 500, c - 500, c + 500, c + 500), fill=gold)
-    d.ellipse((c - 470, c - 470, c + 470, c + 470), fill=(70, 45, 8, 255))
-    d.ellipse((c - 455, c - 455, c + 455, c + 455), fill=(15, 15, 15, 255))
-
-    step = 360 / len(ROULETTE_ORDER)
-    for i, n in enumerate(ROULETTE_ORDER):
-        start = i * step - 90 - step / 2
-        color = (0, 140, 60, 255) if n == 0 else (200, 25, 35, 255) if n in ROULETTE_RED else (28, 28, 28, 255)
-        d.pieslice((c - 440, c - 440, c + 440, c + 440), start, start + step,
-                   fill=color, outline=gold, width=3)
-    d.ellipse((c - 285, c - 285, c + 285, c + 285), fill=(16, 16, 16, 255), outline=gold, width=10)
-    d.ellipse((c - 160, c - 160, c + 160, c + 160), fill=(8, 8, 8, 255), outline=gold, width=12)
-
-    font = _font(62)
-    for i, n in enumerate(ROULETTE_ORDER):
-        label = str(n)
-        tmp = Image.new("RGBA", (160, 100), (0, 0, 0, 0))
-        td = ImageDraw.Draw(tmp)
-        box = td.textbbox((0, 0), label, font=font)
-        td.text(((160 - (box[2] - box[0])) / 2 - box[0], (100 - (box[3] - box[1])) / 2 - box[1]),
-                label, font=font, fill=(255, 255, 255, 255))
-        rot = tmp.rotate(90 - i * step, resample=Image.BICUBIC, expand=True)
-        theta = math.radians(i * step)
-        x, y = c + 365 * math.sin(theta), c - 365 * math.cos(theta)
-        img.alpha_composite(rot, (int(x - rot.width / 2), int(y - rot.height / 2)))
-    return img.resize((ROULETTE_WHEEL_PX, ROULETTE_WHEEL_PX), Image.LANCZOS)
-
-
-def _roulette_frame(wheel, angle, result=None):
-    """Один кадр: колесо повёрнуто на angle°, указатель сверху; в центре корона или выпавшее число."""
-    from PIL import Image, ImageDraw
-    margin = 20
-    W = ROULETTE_WHEEL_PX + margin * 2
-    canvas = Image.new("RGBA", (W, W), (14, 0, 8, 255))
-    canvas.alpha_composite(wheel.rotate(-angle, resample=Image.BICUBIC), (margin, margin))
-    d = ImageDraw.Draw(canvas)
-    c = W // 2
-    gold = (255, 215, 90, 255)
-    k = ROULETTE_WHEEL_PX / 520
-
-    if result is None:  # корона в центре
-        pts = [(-38, 22), (-38, -22), (-19, 0), (0, -34), (19, 0), (38, -22), (38, 22)]
-        d.polygon([(c + x * k, c + y * k) for x, y in pts], fill=(212, 168, 42, 255))
-    else:               # итог в центре: цветной круг и число
-        color = (0, 140, 60) if result == 0 else (200, 25, 35) if result in ROULETTE_RED else (28, 28, 28)
-        r = 64 * k
-        d.ellipse((c - r, c - r, c + r, c + r), fill=color, outline=gold, width=4)
-        font = _font(int(60 * k))
-        box = d.textbbox((0, 0), str(result), font=font)
-        d.text((c - (box[2] - box[0]) / 2 - box[0], c - (box[3] - box[1]) / 2 - box[1]),
-               str(result), font=font, fill=(255, 255, 255, 255))
-
-    d.polygon([(c - 20 * k, 3), (c + 20 * k, 3), (c, 52 * k)], fill=(225, 30, 30, 255), outline=gold)
-    return canvas.convert("RGB")
-
-
-def make_roulette_gif(n):
-    """Гифка вращения колеса, которая замедляется и останавливается ровно на числе n. Кэшируется."""
-    path = os.path.join(ROULETTE_CACHE_DIR, f"roulette_{n}.gif")
-    if os.path.exists(path):
-        return path
-    try:
-        os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
-        if "wheel" not in _wheel_cache:
-            _wheel_cache["wheel"] = build_wheel_base()
-        wheel = _wheel_cache["wheel"]
-        step = 360 / len(ROULETTE_ORDER)
-        total = 360 * 3 + (-ROULETTE_ORDER.index(n) * step) % 360  # нужный карман окажется под указателем
-        frames, durations = [], []
-        for k in range(ROULETTE_FRAMES):
-            t = k / (ROULETTE_FRAMES - 1)
-            frames.append(_roulette_frame(wheel, total * (1 - (1 - t) ** 3)))  # плавное торможение
-            durations.append(ROULETTE_FRAME_MS)
-        frames.append(_roulette_frame(wheel, total, result=n))
-        durations.append(4000)
-        from PIL import Image
-        frames = [f.quantize(colors=64, dither=Image.Dither.NONE) for f in frames]  # меньше размер файла
-        frames[0].save(path, save_all=True, append_images=frames[1:], duration=durations)
-        return path
-    except Exception as e:
-        print(f"Не удалось создать гифку рулетки (нужен pip install pillow): {e!r}")
-        return None
-
-
-def upload_gif(peer_id, path):
-    try:
-        res = vk_upload.document_message(path, title="Рулетка", peer_id=peer_id)
-        doc = res.get("doc", res)
-        return f"doc{doc['owner_id']}_{doc['id']}"
-    except Exception as e:
-        print(f"Не удалось загрузить гифку (у токена должно быть право «Документы»): {e!r}")
-        return None
-
-
-def roulette_wins(bet_type, n):
-    if n == 0:
-        return False
-    if bet_type == "red":
-        return n in ROULETTE_RED
-    if bet_type == "black":
-        return n not in ROULETTE_RED
-    if bet_type == "even":
-        return n % 2 == 0
-    return n % 2 == 1
-
-
-def roulette_emoji(n):
-    return "🟢" if n == 0 else "🔴" if n in ROULETTE_RED else "⚫"
-
-
-def roulette_spin(peer_id, uid, bet_type, bet, cmid=None):
-    """Списывает ставку, выбирает число, запускает гифку. Итог объявит таймер после анимации."""
-    user = get_user(uid)
-    user["money"] -= bet
-    n = random.randint(0, 36)
-    economy["seq"]["roulette"] += 1
-    rid = str(economy["seq"]["roulette"])
-    rec = {"peer": peer_id, "cmid": cmid, "uid": uid, "bet": bet, "t": bet_type, "n": n,
-           "att": None, "reveal_at": time.time() + 60, "done": False, "ts": int(time.time())}
-    economy["roulette"][rid] = rec
-    save_economy()  # ставка уже списана и записана: при сбое итог всё равно будет объявлен
-
-    path = make_roulette_gif(n)
-    att = upload_gif(peer_id, path) if path else None
-    names = get_names([uid])
-    text = (f"🎰 Рулетка крутится…\n"
-            f"{mention(uid, names)} ставит {fmt_num(bet)} 💰 на {ROULETTE_TITLES[bet_type]}\n\n"
-            f"Удачи! 🍀")
-    if cmid:
-        edit_message(peer_id, cmid, text, None, attachment=att)
-    else:
-        cmid = send_get_cmid(peer_id, text, attachment=att)
-    rec["cmid"] = cmid
-    rec["att"] = att
-    rec["reveal_at"] = time.time() + (ROULETTE_DELAY if att else 2.5)
-    save_economy()
-
-
-def check_roulette_reveals():
-    now = time.time()
-    for rec in list(economy["roulette"].values()):
-        if rec["done"] or rec["reveal_at"] > now:
-            continue
-        rec["done"] = True
-        uid, bet, n = rec["uid"], rec["bet"], rec["n"]
-        user = get_user(uid)
-        win = roulette_wins(rec["t"], n)
-        mult = ROULETTE_PAYOUT * win_mult(uid)
-        payout = int(Decimal(bet) * Decimal(str(mult)))
-        names = get_names([uid])
-        kind = "нулевое" if n == 0 else ("красное" if n in ROULETTE_RED else "чёрное")
-        parity = "" if n == 0 else (", чётное" if n % 2 == 0 else ", нечётное")
-        lines = [f"🎰 Выпало: {n} {roulette_emoji(n)} ({kind}{parity})",
-                 f"{mention(uid, names)} — ставка {fmt_num(bet)} 💰 на {ROULETTE_TITLES[rec['t']]}", ""]
-        if win:
-            user["money"] += payout
-            vip_note = f" (VIP ✨ x{mult:g})" if mult != ROULETTE_PAYOUT else ""
-            lines.append(f"✅ Выигрыш x{ROULETTE_PAYOUT}{vip_note}: +{fmt_num(payout)} 💰")
-            log_action(rec["peer"], uid, f"рулетка: выигрыш {payout}")
-        else:
-            lines.append(f"❌ Проигрыш: −{fmt_num(bet)} 💰")
-        lines.append(f"💰 Баланс: {fmt_num(user['money'])}")
-        save_economy()
-        text = "\n".join(lines)
-        if rec.get("cmid"):
-            edit_message(rec["peer"], rec["cmid"], text, None, attachment=rec.get("att"))
-        else:
-            send(rec["peer"], text)
-
-
-def prune_roulette():
-    now = time.time()
-    for k in [k for k, r in economy["roulette"].items() if r["done"] and now - r.get("ts", 0) > 86400]:
-        del economy["roulette"][k]
-
-
-def roulette_usage():
-    return ("🎰 Рулетка\n\n"
-            "Ставка: рулетка чет 1кк / рулетка нечет 500к\n"
-            "Или: рулетка красный 1кк / рулетка черный все\n"
-            f"Выигрыш x{ROULETTE_PAYOUT} (VIP — x{ROULETTE_PAYOUT * VIP_WIN_BONUS:g}).\n"
-            "Выпал 0 — ставка проиграна.\n\n"
-            "Можно проще: рулетка СУММА — и выбрать вариант кнопкой.")
-
-
-def cmd_roulette(msg, rest, slash):
-    peer_id = msg["peer_id"]
-    uid = msg["from_id"]
-    parts = rest.split()
-    if not parts:
-        send(peer_id, roulette_usage())
-        return
-
-    balance = get_user(uid)["money"]
-    kind = ROULETTE_BETS.get(parts[0].lower().replace("ё", "е"))
-    if kind:                                   # рулетка чет 1кк
-        bet = parse_amount(parts[1], balance) if len(parts) > 1 else None
-        if bet is None:
-            send(peer_id, roulette_usage())
-            return
-        err = check_bet(bet, balance)
-        if err:
-            send(peer_id, err)
-            return
-        roulette_spin(peer_id, uid, kind, bet)
-        return
-
-    bet = parse_amount(parts[0], balance)      # рулетка 1кк → четыре кнопки
-    if bet is None:
-        if slash:
-            send(peer_id, roulette_usage())
-        return
-    err = check_bet(bet, balance)
-    if err:
-        send(peer_id, err)
-        return
-    kb = VkKeyboard(inline=True)
-    for i, (t, label, color) in enumerate((
-            ("red", "🔴 Красный", VkKeyboardColor.NEGATIVE),
-            ("black", "⚫ Чёрный", VkKeyboardColor.SECONDARY),
-            ("even", "✅ Чётный", VkKeyboardColor.POSITIVE),
-            ("odd", "❌ Нечётный", VkKeyboardColor.PRIMARY))):
-        if i == 2:
-            kb.add_line()
-        kb.add_callback_button(label, color, {"cmd": "roul", "t": t, "b": bet, "o": uid})
-    send(peer_id,
-         f"🎰 Рулетка\nСтавка: {fmt_num(bet)} 💰\n\n"
-         f"На что ставите? Выигрыш x{ROULETTE_PAYOUT} (VIP — x{ROULETTE_PAYOUT * VIP_WIN_BONUS:g}).",
-         kb.get_keyboard())
-
-
-def roulette_action(ev, p):
-    peer_id, uid, cmid = ev["peer_id"], ev["user_id"], ev["conversation_message_id"]
-    if uid != p.get("o"):
-        return "Это чужая ставка. Напишите «рулетка» сами."
-    kind = p.get("t")
-    if kind not in ROULETTE_TITLES:
-        return "Неверная ставка."
-    if any(r["peer"] == peer_id and r.get("cmid") == cmid for r in economy["roulette"].values()):
-        return "Рулетка уже запущена."
-    bet = int(p.get("b", 0))
-    err = check_bet(bet, get_user(uid)["money"])
-    if err:
-        return "Недостаточно денег для этой ставки."
-    roulette_spin(peer_id, uid, kind, bet, cmid=cmid)
-    return None
-
-
 # ---------------------- Обработка сообщений ----------------------
 # Окна с листалкой: команда -> (функция страницы, первая страница, последняя страница)
 PAGERS = {
-    "top": (build_top_page, 1, 2),
     "admins": (build_admins_page, 1, len(ROLES) + 1),
     "help": (build_help_page, 1, len(ROLES) + 1),
     "history": (build_history_page, 1, HISTORY_PAGES),
@@ -3082,9 +2384,6 @@ register(("префикс", "prefix"), cmd_prefix)
 register(("timeout", "тишина"), cmd_timeout)
 register(("деньги", "money"), cmd_give_money)
 register(("опыт", "exp"), cmd_give_exp)
-register(("забрать", "take"), cmd_take_money)
-register(("правила", "rules"), cmd_rules)
-register(("рулетка", "roulette"), cmd_roulette)
 register(("удалить", "delete"), cmd_delete)
 register(("logs", "логи"), cmd_logs)
 
@@ -3093,7 +2392,6 @@ TWO_WORD_COMMANDS = {
     ("снять", "варн"): "унварн",
     ("выдать", "опыт"): "опыт",
     ("выдать", "деньги"): "деньги",
-    ("забрать", "деньги"): "забрать",
 }
 
 
@@ -3147,23 +2445,20 @@ def handle_message(msg):
 def main():
     prune_games()
     prune_duels()
-    prune_roulette()
     rollover_if_needed()
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
-    threading.Thread(target=tick_loop, daemon=True).start()  # таймеры дуэлей и рулетки
     print("Бот запущен")
     try:
         for event in longpoll.listen():
             try:
-                with LOCK:
-                    if event.type == VkBotEventType.MESSAGE_NEW:
-                        msg = event.obj.message
-                        if msg["peer_id"] >= CHAT_OFFSET:
-                            handle_message(msg)
-                        else:
-                            handle_dm(msg)       # личка: репорты
-                    elif event.type == VkBotEventType.MESSAGE_EVENT:
-                        handle_callback(event.obj)
+                if event.type == VkBotEventType.MESSAGE_NEW:
+                    msg = event.obj.message
+                    if msg["peer_id"] >= CHAT_OFFSET:
+                        handle_message(msg)
+                    else:
+                        handle_dm(msg)       # личка: репорты
+                elif event.type == VkBotEventType.MESSAGE_EVENT:
+                    handle_callback(event.obj)
             except Exception as e:
                 print(f"Ошибка: {e!r}")
     finally:
