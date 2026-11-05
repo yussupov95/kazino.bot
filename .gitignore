@@ -1,0 +1,5 @@
+bot.db
+bot.db-wal
+bot.db-shm
+backups/
+cache/
