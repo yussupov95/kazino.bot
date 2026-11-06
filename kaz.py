@@ -73,6 +73,7 @@ MIN_LEVEL_TO_PREFIX = 3         # префикс
 MIN_LEVEL_TO_TIMEOUT = 3        # timeout
 MIN_LEVEL_TO_GIVE = 4           # деньги, опыт
 MIN_LEVEL_LOGS = 5              # logs
+MIN_LEVEL_TO_FREEZE = 4         # заморозить, разморозить
 
 MAX_DELETE_AT_ONCE = 10         # сколько пересланных сообщений можно удалить за раз
 MAX_MUTE_SECONDS = 30 * 86400   # максимальный срок мута — 30 дней
@@ -94,7 +95,8 @@ PLAYER_LEVELS = [
 
 # --- Мины ---
 MINES_CELLS = 9                 # квадрат 3×3 (в inline-клавиатуре VK максимум 10 кнопок)
-MINES_MIN = 3                   # минимум мин
+MINES_MIN = 2                   # минимум мин
+MINES_COEF_BONUS = 1.05         # надбавка к коэффициенту «Мин» (1.0 — без надбавки)
 MINES_MAX = 8                   # максимум мин (должен остаться хотя бы 1 алмаз)
 MINES_HOUSE_EDGE = 0.03         # комиссия казино 3%
 MIN_BET = 100
@@ -145,7 +147,7 @@ FREEZE_SECONDS = 600            # на 10 минут
 INSTANCE_PORT = 47653           # защита от второго запуска бота на этом компьютере
 
 # --- Рыбалка ---
-FISH_COOLDOWN = 60              # удочку можно забрасывать раз в минуту
+FISH_COOLDOWN = 1800            # удочку можно забрасывать раз в 30 минут
 FISH_CELLS = 6                  # клеток-«водоёмов» (2 ряда по 3)
 FISH_RARE_CHANCE = 0.10         # 10% — редкая рыба
 FISH_MEDIUM_CHANCE = 0.25       # 25% — хорошая рыба, остальное — обычная
@@ -153,6 +155,11 @@ FISH_COMMON = 500_000           # обычная рыба — 500к
 FISH_MEDIUM_RANGE = (1_000_000, 2_000_000)   # хорошая — 1–2кк
 FISH_RARE_RANGE = (5_000_000, 10_000_000)    # редкая — 5–10кк
 FISH_IMAGE = "fishing.jpg"      # своя картинка: положите файл рядом с ботом
+PROFILE_IMAGE = "profile.jpg"   # картинка профиля (своя — положите файл рядом с ботом)
+REP_COOLDOWN = 3600             # +реп / -реп: раз в час
+FREEZE_FOREVER = 10 * 365 * 86400   # «заморозить» без срока
+ROULETTE_SHOW_TIMEOUT = 60      # если рулетка не показалась за это время (сбой VK) — ставка возвращается
+ROULETTE_DELIVER_TRIES = 30     # сколько раз пытаться показать итог рулетки, если VK недоступен
 FISH_NAMES = {
     "common": [("Карась", "🐟"), ("Плотва", "🐟"), ("Окунь", "🐟"), ("Уклейка", "🐟")],
     "medium": [("Щука", "🐠"), ("Лещ", "🐠"), ("Судак", "🐠")],
@@ -210,7 +217,7 @@ def _n(x):
 # Раздел «команды»: кнопки переходят по разделам
 COMMAND_CATEGORIES = [
     ("🎮 Игры", [
-        ("рыбалка", f"заработок без денег: удочка раз в {FISH_COOLDOWN} сек., рыба от {_n(FISH_COMMON)} до {_n(FISH_RARE_RANGE[1])} 💰"),
+        ("рыбалка", f"заработок без денег: удочка раз в {FISH_COOLDOWN // 60} мин., рыба от {_n(FISH_COMMON)} до {_n(FISH_RARE_RANGE[1])} 💰"),
         ("мины [ставка]", f"игра «Мины»: квадрат 3×3 ({MINES_CELLS} клеток), от {MINES_MIN} мин, коэффициент растёт"),
         ("дуэль СУММА (ответом)", f"дуэль на револьвере: на принятие — {DUEL_PENDING_SECONDS} сек., на выстрел — {DUEL_SHOT_SECONDS} сек."),
         ("рулетка ТИП СУММА", f"рулетка с анимацией, выигрыш x{ROULETTE_PAYOUT}. ТИП: чет, нечет, красный, черный. Пример: рулетка чет 1кк"),
@@ -227,6 +234,7 @@ COMMAND_CATEGORIES = [
     ("👤 Профиль и беседа", [
         ("профиль", "посмотреть свой профиль"),
         ("префикс", "ваш префикс и уровень"),
+        ("+реп / -реп", f"репутация игрока (ответом на сообщение), раз в {REP_COOLDOWN // 3600} ч."),
         ("топ", "топ дня по сообщениям или по балансу (кнопки)"),
         ("история", "промокоды и прошлые топы"),
         ("правила", "правила беседы"),
@@ -266,6 +274,8 @@ _staff(MIN_LEVEL_TO_GIVE, "деньги (ответом) СУММА",
 _staff(MIN_LEVEL_TO_GIVE, "забрать (ответом) СУММА", "забрать деньги (с разрешения владельца). Пример: забрать 5кк")
 _staff(MIN_LEVEL_TO_GIVE, "забрать опыт (ответом) ЧИСЛО", "забрать опыт (с разрешения владельца). Пример: забрать опыт 50")
 _staff(MIN_LEVEL_TO_GIVE, "опыт (ответом) ЧИСЛО", "выдать опыт. Пример: опыт 50")
+_staff(MIN_LEVEL_TO_FREEZE, "заморозить (ответом / ID) [минуты]", "заморозить: все команды бота недоступны, можно только писать в чат")
+_staff(MIN_LEVEL_TO_FREEZE, "разморозить (ответом / ID)", "снять заморозку")
 _staff(MIN_LEVEL_LOGS, "logs [ответом / ID] [вчера]", "логи за день вам в личные сообщения")
 # =====================================================
 
@@ -420,7 +430,8 @@ def _build_tables():
                ("vip_until", "vip_until", "REAL", "r"), ("prefix", "prefix", "TEXT", "t"),
                ("last_transfer", "last_transfer", "REAL", "r"), ("last_report", "last_report", "REAL", "r"),
                ("last_fish", "last_fish", "REAL", "r"), ("fish_n", "fish_n", "INTEGER", "i"),
-               ("fish_sum", "fish_sum", "INTEGER", "i")]
+               ("fish_sum", "fish_sum", "INTEGER", "i"), ("reg", "registered", "REAL", "r"),
+               ("rep", "reputation", "INTEGER", "i"), ("last_rep", "last_rep", "REAL", "r")]
     promos_f = [("name", "name", "TEXT", "t"), ("amount", "amount", "INTEGER", "i"),
                 ("uses", "uses", "INTEGER", "i"), ("by", "by_user", "INTEGER", "i"), ("t", "created", "INTEGER", "i")]
     games_f = [("owner", "owner", "INTEGER", "i"), ("bet", "bet", "INTEGER", "i"), ("m", "mines_count", "INTEGER", "i"),
@@ -441,7 +452,10 @@ def _build_tables():
     roul_f = [("peer", "peer", "INTEGER", "i"), ("cmid", "cmid", "INTEGER", "i"), ("uid", "user_id", "INTEGER", "i"),
               ("bet", "bet", "INTEGER", "i"), ("t", "bet_type", "TEXT", "t"), ("n", "number", "INTEGER", "i"),
               ("att", "attachment", "TEXT", "t"), ("reveal_at", "reveal_at", "REAL", "r"),
-              ("done", "done", "INTEGER", "b"), ("ts", "created", "INTEGER", "i")]
+              ("done", "done", "INTEGER", "b"), ("ts", "created", "INTEGER", "i"),
+              ("shown", "shown", "INTEGER", "b"), ("paid", "paid", "INTEGER", "b"),
+              ("tries", "tries", "INTEGER", "i"), ("win", "win", "INTEGER", "b"),
+              ("payout", "payout", "INTEGER", "i"), ("retry_at", "retry_at", "REAL", "r")]
     rmode_f = [("until", "until", "REAL", "r"), ("left", "uses_left", "INTEGER", "i")]
 
     def econ(key):
@@ -665,6 +679,10 @@ def init_db():
         db.execute("PRAGMA synchronous=NORMAL")
         for t in TABLES:
             db.execute(t.create_sql())
+            have = {r[1] for r in db.execute(f"PRAGMA table_info({t.name})")}
+            for col, typ in t.vals:  # база от прошлой версии: добавляем новые колонки
+                if col not in have:
+                    db.execute(f"ALTER TABLE {t.name} ADD COLUMN {col} {typ}")
         db.execute("CREATE TABLE IF NOT EXISTS app_meta (meta_key TEXT PRIMARY KEY, value TEXT)")
         db.execute("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, t INTEGER NOT NULL, "
                    "kind TEXT, peer_id INTEGER, user_id INTEGER, text TEXT)")
@@ -761,7 +779,7 @@ def count_message(msg):
 
 # ---------- экономика ----------
 def get_user(uid):
-    return economy["users"].setdefault(str(uid), {"money": 0, "exp": 0, "last_bonus": 0})
+    return economy["users"].setdefault(str(uid), {"money": 0, "exp": 0, "last_bonus": 0, "reg": time.time()})
 
 
 def player_level(exp):
@@ -1084,7 +1102,7 @@ def handle_callback(ev):
     uid = ev["user_id"]
     left = freeze_left(uid) if uid != OWNER_ID else 0
     if left > 0:
-        answer_event(ev, f"🧊 Вы в заморозке ещё {fmt_duration(left)}.")
+        answer_event(ev, f"🧊 Вы в заморозке {freeze_text(left)}.")
         return
 
     actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action,
@@ -1201,51 +1219,42 @@ def cmd_help(msg, rest, slash):
 # ---------------------- «профиль» ----------------------
 def build_profile(peer_id, uid):
     info = get_user_info(uid)
+    user = get_user(uid)
+    if not user.get("reg"):  # игрок из прошлой версии: дата — первое сообщение, которое видел бот
+        firsts = [c[str(uid)]["first"] for c in stats.values() if str(uid) in c and c[str(uid)].get("first")]
+        user["reg"] = min(firsts) if firsts else time.time()
+        save_economy()
     level = get_level(peer_id, uid)
-    role = ROLES.get(level, "Участник")
+    lvl, lname, lo, hi = player_level(user["exp"])
+    progress = f"{user['exp']}/{hi}" if user["exp"] < PLAYER_LEVELS[-1][3] else "макс."
 
-    chat_stats = stats.get(str(peer_id), {})
-    st = chat_stats.get(str(uid))
-
-    user = economy["users"].get(str(uid), {})
-    p_lvl, p_name, _, _ = player_level(user.get("exp", 0))
-
-    link = f"vk.com/{info['screen'] or f'id{uid}'}"
     lines = [
-        "👤 Профиль",
-        "",
-        f"Имя: {mention(uid, {uid: info['name']})}",
-        f"VK ID: {uid}",
-        f"Ссылка: {link}",
-        f"Роль в беседе: {role}",
-        f"Уровень игрока: {p_lvl} — {p_name}",
+        f"🏠 Профиль {mention(uid, {uid: info['name']})}",
+        f"💰 Баланс: {fmt_num(user['money'])}",
+        f"💪 Уровень: {lvl} — {lname} ({progress})",
+        f"😘 Репутация: {user.get('rep', 0)}",
+        f"🆔 ID: {uid}",
+        f"👀 Дата регистрации: {datetime.fromtimestamp(user['reg']).strftime('%Y-%m-%d %H:%M:%S')}",
     ]
+    extra = []
+    if level:
+        extra.append(f"🛡 Роль в беседе: {ROLES[level]}")
     if vip_active(user):
-        lines.append(f"✨ VIP: до {fmt_time(user['vip_until'])}")
-
-    if st:
-        count = st["n"]
-        rank = 1 + sum(1 for x in chat_stats.values() if x["n"] > count)
-        lines += [
-            f"Сообщений в чате: {fmt_num(count)}",
-            f"Место по сообщениям за всё время: {rank} из {len(chat_stats)}",
-            f"Первое сообщение: {fmt_time(st['first'])}",
-            f"Последнее сообщение: {fmt_time(st['last'])}",
-        ]
-    else:
-        lines += ["Сообщений в чате: 0"]
-
-    if info["online"] is not None:
-        lines.append(f"Сейчас в сети: {'да' if info['online'] == 1 else 'нет'}")
-
+        extra.append(f"✨ VIP до {fmt_time(user['vip_until'])}")
+    chat_st = stats.get(str(peer_id), {}).get(str(uid))
+    if chat_st:
+        extra.append(f"💬 Сообщений в чате: {fmt_num(chat_st['n'])}")
     warns = len(get_warns(peer_id, uid))
     if warns:
-        lines.append(f"⚠ Предупреждения: {warns}/{WARNS_LIMIT}")
+        extra.append(f"⚠ Предупреждения: {warns}/{WARNS_LIMIT}")
     left = mute_left(peer_id, uid)
     if left > 0:
-        lines.append(f"🔇 В муте ещё: {fmt_duration(left)}")
-
-    lines += ["", "ℹ Статистика ведётся с момента запуска бота в этой беседе."]
+        extra.append(f"🔇 В муте ещё: {fmt_duration(left)}")
+    fz = freeze_left(uid)
+    if fz > 0:
+        extra.append(f"🧊 Заморожен {freeze_text(fz)}")
+    if extra:
+        lines += [""] + extra
     return "\n".join(lines)
 
 
@@ -1268,7 +1277,16 @@ def cmd_profile(msg, rest, slash):
                       "Свой профиль — команда «профиль».")
         return
 
-    send(peer_id, build_profile(peer_id, target))
+    text = build_profile(peer_id, target)
+    att = profile_attachment(peer_id)
+    try:
+        send(peer_id, text, attachment=att)
+    except Exception as e:
+        if not att:
+            raise
+        print(f"Не удалось отправить картинку профиля, шлю без неё: {e!r}")
+        drop_photo_cache("profile")
+        send(peer_id, text)
 
 
 # ---------------------- «топ» ----------------------
@@ -1410,7 +1428,7 @@ def mines_coef(mines, opened, vip=False):
     p = 1.0
     for i in range(opened):
         p *= (MINES_CELLS - mines - i) / (MINES_CELLS - i)
-    coef = (1 - MINES_HOUSE_EDGE) / p
+    coef = (1 - MINES_HOUSE_EDGE) * MINES_COEF_BONUS / p
     if vip:
         coef *= VIP_WIN_BONUS
     return round(coef, 2)
@@ -3143,38 +3161,6 @@ def roulette_emoji(n):
     return "🟢" if n == 0 else "🔴" if n in ROULETTE_RED else "⚫"
 
 
-def check_roulette_reveals():
-    now = time.time()
-    for rec in list(economy["roulette"].values()):
-        if rec["done"] or rec["reveal_at"] > now:
-            continue
-        rec["done"] = True
-        uid, bet, n = rec["uid"], rec["bet"], rec["n"]
-        user = get_user(uid)
-        win = roulette_wins(rec["t"], n)
-        mult = ROULETTE_PAYOUT * win_mult(uid)
-        payout = int(Decimal(bet) * Decimal(str(mult)))
-        names = get_names([uid])
-        kind = "нулевое" if n == 0 else ("красное" if n in ROULETTE_RED else "чёрное")
-        parity = "" if n == 0 else (", чётное" if n % 2 == 0 else ", нечётное")
-        lines = [f"🎰 Выпало: {n} {roulette_emoji(n)} ({kind}{parity})",
-                 f"{mention(uid, names)} — ставка {fmt_num(bet)} 💰 на {ROULETTE_TITLES[rec['t']]}", ""]
-        if win:
-            user["money"] += payout
-            vip_note = f" (VIP ✨ x{mult:g})" if mult != ROULETTE_PAYOUT else ""
-            lines.append(f"✅ Выигрыш x{ROULETTE_PAYOUT}{vip_note}: +{fmt_num(payout)} 💰")
-            log_action(rec["peer"], uid, f"рулетка: выигрыш {payout}")
-        else:
-            lines.append(f"❌ Проигрыш: −{fmt_num(bet)} 💰")
-        lines.append(f"💰 Баланс: {fmt_num(user['money'])}")
-        save_economy()
-        text = "\n".join(lines)
-        if rec.get("cmid"):
-            edit_message(rec["peer"], rec["cmid"], text, None, attachment=rec.get("att"))
-        else:
-            send(rec["peer"], text)
-
-
 def prune_roulette():
     now = time.time()
     for k in [k for k, r in economy["roulette"].items() if r["done"] and now - r.get("ts", 0) > 86400]:
@@ -3678,26 +3664,6 @@ def make_fishing_image():
         return None
 
 
-def fishing_attachment(peer_id):
-    """Картинка рыбалки: свой файл fishing.jpg рядом с ботом или нарисованная. Загружается в VK один раз."""
-    path = FISH_IMAGE if os.path.exists(FISH_IMAGE) else make_fishing_image()
-    if not path:
-        return None
-    key = f"fishing_{int(os.path.getmtime(path))}"
-    cached = economy["media"].get(key)
-    if cached:
-        return cached
-    try:
-        photo = vk_upload.photo_messages(path)[0]
-        att = f"photo{photo['owner_id']}_{photo['id']}"
-        economy["media"] = {key: att}
-        save_economy()
-        return att
-    except Exception as e:
-        print(f"Не удалось загрузить картинку рыбалки (у токена должно быть право «Фотографии»): {e!r}")
-        return None
-
-
 def roll_fish():
     r = random.random()
     if r < FISH_RARE_CHANCE:
@@ -3726,7 +3692,7 @@ def fishing_page(user, uid, cell=None, fish=None):
         "",
         f"Поймано рыб: {user.get('fish_n', 0)} | Заработано: {fmt_num(user.get('fish_sum', 0))} 💰",
         f"💰 Баланс: {fmt_num(user['money'])}",
-        f"Удочку можно забрасывать раз в {FISH_COOLDOWN} сек.",
+        f"Удочку можно забрасывать раз в {fmt_duration(FISH_COOLDOWN)}.",
         f"Улов: чаще всего {fmt_num(FISH_COMMON)} 💰, иногда {fmt_num(FISH_MEDIUM_RANGE[0])}–"
         f"{fmt_num(FISH_MEDIUM_RANGE[1])} 💰, с шансом {int(FISH_RARE_CHANCE * 100)}% — "
         f"{fmt_num(FISH_RARE_RANGE[0])}–{fmt_num(FISH_RARE_RANGE[1])} 💰",
@@ -3750,8 +3716,7 @@ def cmd_fishing(msg, rest, slash):
         if not att:
             raise
         print(f"Не удалось отправить картинку рыбалки, шлю без неё: {e!r}")
-        economy["media"] = {}
-        save_economy()
+        drop_photo_cache("fishing")
         send(peer_id, text, kb)
 
 
@@ -3763,7 +3728,7 @@ def fish_action(ev, p):
     now = time.time()
     left = user.get("last_fish", 0) + FISH_COOLDOWN - now
     if left > 0:
-        return f"🎣 Рыба ещё не клюёт. Подождите {int(left) + 1} сек."
+        return f"🎣 Рыба ещё не клюёт. Подождите {fmt_duration(left)}."
 
     cell = max(0, min(int(p.get("c", 0)), FISH_CELLS - 1))
     fish = roll_fish()
@@ -3785,43 +3750,6 @@ def fish_action(ev, p):
 
 
 # ---------------------- Рулетка: показ в отдельном потоке ----------------------
-def roulette_spin(peer_id, uid, bet_type, bet, cmid=None):
-    """Списывает ставку и выбирает число. Гифку делает и грузит отдельный поток, чтобы бот не «зависал»."""
-    user = get_user(uid)
-    user["money"] -= bet
-    n = random.randint(0, 36)
-    economy["seq"]["roulette"] += 1
-    rid = str(economy["seq"]["roulette"])
-    economy["roulette"][rid] = {
-        "peer": peer_id, "cmid": cmid, "uid": uid, "bet": bet, "t": bet_type, "n": n,
-        "att": None, "reveal_at": time.time() + 90, "done": False, "ts": int(time.time()),
-    }
-    save_economy()  # ставка уже списана и записана: при любом сбое итог всё равно будет объявлен
-    threading.Thread(target=roulette_present, args=(rid,), daemon=True).start()
-
-
-def roulette_present(rid):
-    rec = economy["roulette"].get(rid)
-    if not rec:
-        return
-    peer_id, uid, bet, bet_type, n = rec["peer"], rec["uid"], rec["bet"], rec["t"], rec["n"]
-    path = make_roulette_gif(n)                          # долго — без блокировки бота
-    att = upload_gif(peer_id, path) if path else None
-    with LOCK:
-        names = get_names([uid])
-        text = (f"🎰 Рулетка крутится…\n"
-                f"{mention(uid, names)} ставит {fmt_num(bet)} 💰 на {ROULETTE_TITLES[bet_type]}\n\n"
-                f"Удачи! 🍀")
-        try:
-            if rec.get("cmid"):
-                edit_message(peer_id, rec["cmid"], text, None, attachment=att)
-            else:
-                rec["cmid"] = send_get_cmid(peer_id, text, attachment=att)
-        except Exception as e:
-            print(f"Не удалось показать рулетку: {e!r}")
-        rec["att"] = att
-        rec["reveal_at"] = time.time() + (ROULETTE_DELAY if att else 2.5)
-        save_economy()
 
 
 # ---------------------- Репорты: награда на усмотрение владельца ----------------------
@@ -3952,6 +3880,325 @@ def owner_reward_input(msg, text):
     return True
 
 
+# ---------------------- Картинки: общий кэш загрузки фото в VK ----------------------
+def cached_photo(peer_id, path, name):
+    """Загружает картинку в VK один раз и запоминает её attachment. Новый файл (другая дата) — загрузка заново."""
+    key = f"{name}_{int(os.path.getmtime(path))}"
+    cached = economy["media"].get(key)
+    if cached:
+        return cached
+    try:
+        photo = vk_upload.photo_messages(path)[0]
+        att = f"photo{photo['owner_id']}_{photo['id']}"
+        for old in [k for k in economy["media"] if k.startswith(name + "_")]:
+            del economy["media"][old]
+        economy["media"][key] = att
+        save_economy()
+        return att
+    except Exception as e:
+        print(f"Не удалось загрузить картинку «{name}» (у токена должно быть право «Фотографии»): {e!r}")
+        return None
+
+
+def drop_photo_cache(name):
+    for old in [k for k in economy["media"] if k.startswith(name + "_")]:
+        del economy["media"][old]
+    save_economy()
+
+
+def make_profile_image():
+    """Человечек без вещей на зелёном поле. Вещи для него можно будет докупать позже."""
+    path = os.path.join(ROULETTE_CACHE_DIR, "profile.png")
+    if os.path.exists(path):
+        return path
+    try:
+        from PIL import Image, ImageDraw
+        os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
+        u = 2
+        W, H = 900 * u, 600 * u
+        img = Image.new("RGB", (W, H))
+        d = ImageDraw.Draw(img)
+
+        def lerp(a, b, t):
+            return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+        horizon = int(H * 0.52)
+        for y in range(horizon):                                     # небо
+            d.line([(0, y), (W, y)], fill=lerp((104, 180, 240), (206, 233, 250), y / horizon))
+        for y in range(horizon, H):                                  # зелёное поле
+            d.line([(0, y), (W, y)], fill=lerp((126, 204, 88), (44, 124, 46), (y - horizon) / (H - horizon)))
+        d.ellipse((W * 0.78 - 60 * u, 70 * u - 60 * u, W * 0.78 + 60 * u, 70 * u + 60 * u), fill=(255, 241, 170))
+        for cx, cy, r in ((150, 90, 44), (205, 80, 34), (115, 100, 30), (560, 60, 38), (620, 72, 28)):   # облака
+            d.ellipse(((cx - r) * u, (cy - r // 2) * u, (cx + r) * u, (cy + r // 2) * u), fill=(255, 255, 255))
+        d.polygon([(0, horizon), (0, horizon - 40 * u), (160 * u, horizon - 70 * u), (340 * u, horizon - 28 * u),
+                   (520 * u, horizon - 62 * u), (720 * u, horizon - 24 * u), (W, horizon - 50 * u), (W, horizon)],
+                  fill=(98, 176, 100))
+
+        rnd = random.Random(7)                                       # трава и цветы
+        for _ in range(420):
+            x = rnd.randint(0, W)
+            y = rnd.randint(horizon + 6 * u, H - 4 * u)
+            h = int((6 + 16 * (y - horizon) / (H - horizon)) * u)
+            shade = rnd.choice(((72, 160, 60), (58, 140, 52), (96, 180, 72)))
+            d.line([(x, y), (x - 3 * u, y - h)], fill=shade, width=2 * u)
+            d.line([(x, y), (x + 3 * u, y - h)], fill=shade, width=2 * u)
+        for _ in range(26):
+            x = rnd.randint(30 * u, W - 30 * u)
+            y = rnd.randint(horizon + 40 * u, H - 20 * u)
+            col = rnd.choice(((255, 255, 255), (255, 224, 90), (255, 150, 190)))
+            d.ellipse((x - 5 * u, y - 5 * u, x + 5 * u, y + 5 * u), fill=col)
+            d.ellipse((x - 2 * u, y - 2 * u, x + 2 * u, y + 2 * u), fill=(230, 150, 40))
+
+        cx, cy, r = 450 * u, 250 * u, 78 * u                         # человечек
+        ink = (22, 22, 22)
+        d.ellipse((cx - 120 * u, 536 * u, cx + 120 * u, 566 * u), fill=(36, 104, 38))   # тень
+        d.line([(cx, cy + r), (cx, 440 * u)], fill=ink, width=9 * u)                      # тело
+        d.line([(cx, cy + r + 34 * u), (cx - 88 * u, 404 * u)], fill=ink, width=9 * u)    # руки
+        d.line([(cx, cy + r + 34 * u), (cx + 88 * u, 404 * u)], fill=ink, width=9 * u)
+        d.line([(cx, 440 * u), (cx - 58 * u, 544 * u)], fill=ink, width=9 * u)            # ноги
+        d.line([(cx, 440 * u), (cx + 58 * u, 544 * u)], fill=ink, width=9 * u)
+        for px, py in ((cx - 88 * u, 404 * u), (cx + 88 * u, 404 * u), (cx - 58 * u, 544 * u),
+                       (cx + 58 * u, 544 * u), (cx, 440 * u)):
+            d.ellipse((px - 5 * u, py - 5 * u, px + 5 * u, py + 5 * u), fill=ink)
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(255, 255, 255), outline=ink, width=8 * u)   # голова
+        for ex in (-26, 26):
+            d.ellipse((cx + (ex - 8) * u, cy - 16 * u, cx + (ex + 8) * u, cy), fill=ink)
+        d.arc((cx - 30 * u, cy + 2 * u, cx + 30 * u, cy + 46 * u), 25, 155, fill=ink, width=6 * u)
+
+        img.resize((900, 600), Image.LANCZOS).save(path)
+        return path
+    except Exception as e:
+        print(f"Не удалось нарисовать картинку профиля (pip install pillow) — профиль будет без картинки: {e!r}")
+        return None
+
+
+def profile_attachment(peer_id):
+    path = PROFILE_IMAGE if os.path.exists(PROFILE_IMAGE) else make_profile_image()
+    return cached_photo(peer_id, path, "profile") if path else None
+
+
+def fishing_attachment(peer_id):
+    """Картинка рыбалки: свой файл fishing.jpg рядом с ботом или нарисованная."""
+    path = FISH_IMAGE if os.path.exists(FISH_IMAGE) else make_fishing_image()
+    return cached_photo(peer_id, path, "fishing") if path else None
+
+
+# ---------------------- Репутация (+реп / −реп) ----------------------
+def cmd_rep(msg, rest, slash, delta):
+    peer_id = msg["peer_id"]
+    uid = msg["from_id"]
+    word = "+реп" if delta > 0 else "-реп"
+    target, tail = parse_target(msg, rest)
+    if target is None:
+        if slash or not rest.strip():
+            send(peer_id, f"ℹ Использование: {word} — ответом на сообщение участника (можно с причиной)\n"
+                          f"Или: {word} ID\nПауза между изменениями репутации — {REP_COOLDOWN // 3600} ч.")
+        return
+    if target <= 0 or target == uid:
+        send(peer_id, "⛔ Нельзя менять репутацию себе или сообществу.")
+        return
+
+    user = get_user(uid)
+    left = user.get("last_rep", 0) + REP_COOLDOWN - time.time()
+    if left > 0:
+        send(peer_id, f"⏳ Репутацию можно менять раз в {REP_COOLDOWN // 3600} ч. "
+                      f"Следующий раз через {fmt_duration(left)}.")
+        return
+
+    other = get_user(target)
+    other["rep"] = other.get("rep", 0) + delta
+    user["last_rep"] = time.time()
+    save_economy()
+    log_action(peer_id, uid, f"{word} → {target}")
+    names = get_names([uid, target])
+    reason = f"\nПричина: {tail[:100]}" if tail.strip() else ""
+    verb = "повысил" if delta > 0 else "понизил"
+    send(peer_id, f"{'👍' if delta > 0 else '👎'} {mention(uid, names)} {verb} репутацию "
+                  f"{mention(target, names)} ({delta:+d}). Репутация: {other['rep']}{reason}")
+
+
+def cmd_rep_plus(msg, rest, slash):
+    cmd_rep(msg, rest, slash, +1)
+
+
+def cmd_rep_minus(msg, rest, slash):
+    cmd_rep(msg, rest, slash, -1)
+
+
+# ---------------------- Заморозка игрока (Тех специалист) ----------------------
+def freeze_text(left):
+    return "без срока" if left > 365 * 86400 else f"ещё на {fmt_duration(left)}"
+
+
+def cmd_freeze(msg, rest, slash):
+    peer_id = msg["peer_id"]
+    actor = msg["from_id"]
+    level = get_level(peer_id, actor)
+    if level < MIN_LEVEL_TO_FREEZE:
+        deny(msg, rest, slash, f"⛔ Замораживать могут {ROLES[MIN_LEVEL_TO_FREEZE]} и выше.")
+        return
+
+    usage = ("ℹ Использование: заморозить — ответом на сообщение участника\n"
+             "Или: заморозить ID [минуты]\nПример: заморозить 60 (на час). Без числа — до «разморозить».")
+    target, tail = parse_target(msg, rest)
+    if target is None:
+        if slash or not rest.strip():
+            send(peer_id, usage)
+        return
+    err = check_punish_target(peer_id, actor, level, target)
+    if err:
+        send(peer_id, err)
+        return
+
+    m = re.search(r"\d+", tail)
+    minutes = int(m.group()) if m else 0
+    now = time.time()
+    punish["freezes"][str(target)] = now + (minutes * 60 if minutes else FREEZE_FOREVER)
+    save_punish()
+    log_action(peer_id, actor, f"заморозил {target} ({minutes or 'без срока'})")
+    names = get_names([target, actor])
+    period = f"на {fmt_duration(minutes * 60)}" if minutes else "без срока"
+    send(peer_id, f"🧊 {mention(target, names)} заморожен {period}.\n"
+                  "Он может только общаться в чате: все команды и кнопки бота недоступны.\n"
+                  f"Модератор: {mention(actor, names)}")
+
+
+def cmd_unfreeze(msg, rest, slash):
+    peer_id = msg["peer_id"]
+    actor = msg["from_id"]
+    if get_level(peer_id, actor) < MIN_LEVEL_TO_FREEZE:
+        deny(msg, rest, slash, f"⛔ Размораживать могут {ROLES[MIN_LEVEL_TO_FREEZE]} и выше.")
+        return
+    target, _ = parse_target(msg, rest)
+    if target is None:
+        if slash or not rest.strip():
+            send(peer_id, "ℹ Использование: разморозить — ответом на сообщение, либо разморозить ID")
+        return
+    names = get_names([target])
+    if punish["freezes"].pop(str(target), None) is None:
+        send(peer_id, f"⚠ {mention(target, names)} не заморожен.")
+        return
+    save_punish()
+    log_action(peer_id, actor, f"разморозил {target}")
+    send(peer_id, f"🔥 {mention(target, names)} разморожен — команды снова доступны.")
+
+
+# ---------------------- Рулетка: ставка не пропадает при сбое связи с VK ----------------------
+def refund_roulette(rec, text):
+    if rec.get("done") or rec.get("paid"):
+        return
+    user = get_user(rec["uid"])
+    user["money"] += rec["bet"]
+    rec["done"] = True
+    rec["paid"] = True
+    save_economy()
+    names = get_names([rec["uid"]])
+    try:
+        send(rec["peer"], f"{mention(rec['uid'], names)} {text}\n💰 Баланс: {fmt_num(user['money'])}")
+    except Exception as e:
+        print(f"Не удалось сообщить о возврате ставки в рулетке: {e!r}")
+
+
+def roulette_spin(peer_id, uid, bet_type, bet, cmid=None):
+    """Списывает ставку и выбирает число. Гифку делает и грузит отдельный поток, чтобы бот не «зависал»."""
+    user = get_user(uid)
+    user["money"] -= bet
+    n = random.randint(0, 36)
+    economy["seq"]["roulette"] += 1
+    rid = str(economy["seq"]["roulette"])
+    economy["roulette"][rid] = {
+        "peer": peer_id, "cmid": cmid, "uid": uid, "bet": bet, "t": bet_type, "n": n,
+        "att": None, "reveal_at": time.time() + 90, "done": False, "ts": int(time.time()),
+        "shown": False, "paid": False, "tries": 0,
+    }
+    save_economy()  # ставка списана и записана вместе с записью о рулетке: при сбое её вернёт проверка
+    threading.Thread(target=roulette_present, args=(rid,), daemon=True).start()
+
+
+def roulette_present(rid):
+    rec = economy["roulette"].get(rid)
+    if not rec:
+        return
+    peer_id, uid, bet, bet_type, n = rec["peer"], rec["uid"], rec["bet"], rec["t"], rec["n"]
+    path = make_roulette_gif(n)                          # долго — без блокировки бота
+    att = upload_gif(peer_id, path) if path else None
+    with LOCK:
+        if rec.get("done"):
+            return
+        names = get_names([uid])
+        text = (f"🎰 Рулетка крутится…\n"
+                f"{mention(uid, names)} ставит {fmt_num(bet)} 💰 на {ROULETTE_TITLES[bet_type]}\n\n"
+                f"Удачи! 🍀")
+        try:
+            if rec.get("cmid"):
+                with_retry(lambda: edit_message(peer_id, rec["cmid"], text, None, attachment=att))
+            else:
+                rec["cmid"] = with_retry(lambda: send_get_cmid(peer_id, text, attachment=att))
+        except Exception as e:  # VK недоступен: рулетка не началась — ставку возвращаем
+            print(f"Не удалось запустить рулетку: {e!r}")
+            refund_roulette(rec, "↩ Рулетка не запустилась (нет связи с VK) — ставка возвращена.")
+            return
+        rec["att"] = att
+        rec["shown"] = True
+        rec["reveal_at"] = time.time() + (ROULETTE_DELAY if att else 2.5)
+        save_economy()
+
+
+def roulette_result_text(rec):
+    uid, bet, n = rec["uid"], rec["bet"], rec["n"]
+    names = get_names([uid])
+    kind = "нулевое" if n == 0 else ("красное" if n in ROULETTE_RED else "чёрное")
+    parity = "" if n == 0 else (", чётное" if n % 2 == 0 else ", нечётное")
+    lines = [f"🎰 Выпало: {n} {roulette_emoji(n)} ({kind}{parity})",
+             f"{mention(uid, names)} — ставка {fmt_num(bet)} 💰 на {ROULETTE_TITLES[rec['t']]}", ""]
+    if rec.get("win"):
+        mult = rec["payout"] / bet
+        vip_note = f" (VIP ✨ x{mult:g})" if mult != ROULETTE_PAYOUT else ""
+        lines.append(f"✅ Выигрыш x{ROULETTE_PAYOUT}{vip_note}: +{fmt_num(rec['payout'])} 💰")
+    else:
+        lines.append(f"❌ Проигрыш: −{fmt_num(bet)} 💰")
+    lines.append(f"💰 Баланс: {fmt_num(get_user(uid)['money'])}")
+    return "\n".join(lines)
+
+
+def check_roulette_reveals():
+    now = time.time()
+    for rec in list(economy["roulette"].values()):
+        if rec["done"]:
+            continue
+        if not rec.get("shown", True):  # рулетку не удалось показать — возвращаем ставку
+            if now - rec.get("ts", now) > ROULETTE_SHOW_TIMEOUT:
+                refund_roulette(rec, "↩ Рулетка не запустилась из-за сбоя связи — ставка возвращена.")
+            continue
+        if rec["reveal_at"] > now or rec.get("retry_at", 0) > now:
+            continue
+
+        if not rec.get("paid"):  # итог ставки применяется ровно один раз
+            uid, bet = rec["uid"], rec["bet"]
+            win = roulette_wins(rec["t"], rec["n"])
+            payout = int(Decimal(bet) * Decimal(str(ROULETTE_PAYOUT * win_mult(uid)))) if win else 0
+            if win:
+                get_user(uid)["money"] += payout
+                log_action(rec["peer"], uid, f"рулетка: выигрыш {payout}")
+            rec.update(paid=True, win=win, payout=payout)
+            save_economy()
+
+        text = roulette_result_text(rec)  # доставка повторяется, пока VK недоступен
+        try:
+            if rec.get("cmid"):
+                edit_message(rec["peer"], rec["cmid"], text, None, attachment=rec.get("att"))
+            else:
+                send(rec["peer"], text)
+            rec["done"] = True
+        except Exception as e:
+            rec["tries"] = rec.get("tries", 0) + 1
+            rec["retry_at"] = now + min(60, 2 ** rec["tries"])
+            print(f"Не удалось показать итог рулетки (попытка {rec['tries']}): {e!r}")
+            if rec["tries"] >= ROULETTE_DELIVER_TRIES:  # деньги уже начислены, сообщение доставить не вышло
+                rec["done"] = True
+        save_economy()
+
+
 # ---------------------- Обработка сообщений ----------------------
 # Окна с листалкой: команда -> (функция страницы, первая страница, последняя страница)
 PAGERS = {
@@ -4000,6 +4247,10 @@ register(("забрать", "take"), cmd_take_money)
 register(("правила", "rules"), cmd_rules)
 register(("рулетка", "roulette"), cmd_roulette)
 register(("рыбалка", "fishing"), cmd_fishing)
+register(("+реп", "+rep", "+репутация"), cmd_rep_plus)
+register(("-реп", "-rep", "-репутация"), cmd_rep_minus)
+register(("заморозить", "freeze"), cmd_freeze)
+register(("разморозить", "unfreeze"), cmd_unfreeze)
 register(("забрать_опыт",), cmd_take_exp)
 register(("удалить", "delete"), cmd_delete)
 register(("logs", "логи"), cmd_logs)
@@ -4012,6 +4263,8 @@ TWO_WORD_COMMANDS = {
     ("забрать", "деньги"): "забрать",
     ("забрать", "опыт"): "забрать_опыт",
     ("снять", "опыт"): "забрать_опыт",
+    ("+", "реп"): "+реп",
+    ("-", "реп"): "-реп",
 }
 
 
@@ -4061,7 +4314,7 @@ def handle_message(msg):
     if handler:
         left = freeze_left(uid) if uid != OWNER_ID else 0
         if left > 0:  # заморозка: все команды недоступны
-            send(peer_id, f"🧊 Ваши команды заморожены ещё на {fmt_duration(left)}.")
+            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате.")
             return
         handler(msg, rest, slash)
 
