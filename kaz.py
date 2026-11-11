@@ -50,7 +50,6 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
 from vk_api import VkApi
-
 # ===================== НАСТРОЙКИ =====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # папка, где лежит сам бот (имя файла — kaz.py, main.py — неважно)
 
@@ -182,7 +181,7 @@ FISH_RARE_RANGE = (5_000_000, 10_000_000)    # редкая — 5–10кк
 FISH_IMAGE = _find("fishing.jpg")      # своя картинка: положите файл рядом с ботом
 PROFILE_IMAGE = _find("profile.jpg")   # запасная картинка профиля
 PROFILE_OWNER_IMAGE = _find("profile_owner.jpg")   # персонаж владельца (с одеждой владельца)
-PROFILE_MOD_IMAGE = _find("profile_mod.jpg")       # персонаж для модераторов (без одежды)
+
 REP_COOLDOWN = 3600             # +реп / -реп: раз в час
 FREEZE_FOREVER = 10 * 365 * 86400   # «заморозить» без срока
 ROULETTE_SHOW_TIMEOUT = 60      # если рулетка не показалась за это время (сбой VK) — ставка возвращается
@@ -267,8 +266,8 @@ COMMAND_CATEGORIES = [
         ("правила", "правила беседы"),
         ("админы", "роли беседы и кто их занимает"),
     ]),
-    ("🛍 Магазин", [
-        ("магазин", "кепки, футболки, штаны, обувь, поле и дом для вашего персонажа (лента товаров — листайте вправо)"),
+    ("🛍️ Магазин", [
+        ("магазин", "футболка и обувь для вашего персонажа (лента товаров — листайте вправо)"),
         ("мои аксессуары", "надеть или снять купленное"),
     ]),
     ("📨 Обратная связь", [
@@ -283,8 +282,6 @@ STAFF_COMMANDS = {lvl: [] for lvl in ROLES}
 
 def _staff(level, cmd, desc):
     STAFF_COMMANDS[level].append((cmd, desc))
-
-
 _staff(MIN_LEVEL_HELP, "хелп", "команды по ролям (листайте кнопками)")
 _staff(MIN_LEVEL_TO_DELETE, "удалить (ответом на сообщение)", "удалить сообщение участника")
 _staff(MIN_LEVEL_TO_VIEW_PROFILES, "профиль (ответом / ID / @упоминание)", "профиль другого участника")
@@ -424,8 +421,6 @@ def _entity(name, group, store, key_col, key_int, fields, skip=(), key_field=Non
             st[str(r[0])] = rec
 
     return Table(name, group, [(key_col, "INTEGER" if key_int else "TEXT")], vals, flatten, load)
-
-
 def _pairs(name, group, store, vals, to_row, from_row):
     """Двухуровневый словарь {беседа: {пользователь: значение}} → строки (peer_id, user_id, ...)."""
     def flatten():
@@ -519,7 +514,6 @@ def _build_tables():
         st = punish.setdefault("grant_log", {})
         for r in rows:
             st.setdefault(str(r[0]), []).append(r[2])
-
     def hist_flatten():
         return {(int(p), i): (h.get("day"), _j(h.get("top")))
                 for p, lst in daily.setdefault("history", {}).items() for i, h in enumerate(lst)}
@@ -848,8 +842,6 @@ def count_message(msg):
 # ---------- экономика ----------
 def get_user(uid):
     return economy["users"].setdefault(str(uid), {"money": 0, "exp": 0, "last_bonus": 0, "reg": time.time()})
-
-
 def player_level(exp):
     """(номер, название, exp от, exp до). После последнего порога уровень не растёт."""
     for lvl, name, lo, hi in PLAYER_LEVELS:
@@ -1035,8 +1027,6 @@ def target_from_message(msg):
 
 def extract_target(msg, text):
     return target_from_text(text) or target_from_message(msg)
-
-
 def parse_target(msg, rest):
     """
     Для мута/кика/бана. Возвращает (кто, остаток текста).
@@ -1084,7 +1074,6 @@ def nav_keyboard(cmd, page, first, last, opener_id, middle=None):
     noop = middle is None
     if noop:
         middle = (f"{page - first + 1}/{last - first + 1}", page)
-
     def payload(p):
         return {"cmd": cmd, "p": p, "o": opener_id}
 
@@ -1270,8 +1259,6 @@ def build_help_page(peer_id, page, opener_id):
     if page > 1:
         lines += ["", "Роль включает команды всех ролей ниже."]
     return "\n".join(lines), role_tabs_keyboard("help", page, opener_id)
-
-
 def cmd_help(msg, rest, slash):
     peer_id = msg["peer_id"]
     user_id = msg["from_id"]
@@ -1306,7 +1293,7 @@ def build_profile(peer_id, uid):
     ]
     extra = []
     if level:
-        extra.append(f"🛡 Роль в беседе: {ROLES[level]}")
+        extra.append(f"🛡️ Роль в беседе: {ROLES[level]}")
     if vip_active(user):
         extra.append(f"✨ VIP до {fmt_time(user['vip_until'])}")
     chat_st = stats.get(str(peer_id), {}).get(str(uid))
@@ -1353,7 +1340,7 @@ def cmd_profile(msg, rest, slash):
         if not att:
             raise
         print(f"Не удалось отправить картинку профиля, шлю без неё: {e!r}")
-        for name in ("profile", "pfowner", "pfmod", "avatar"):
+        for name in ("profile", "pfowner", "avatar"):
             drop_photo_cache(name)
         send(peer_id, text)
 
@@ -1429,7 +1416,7 @@ def create_promo(peer_id, actor, name, amount, uses):
     }
     save_economy()
     log_action(peer_id, actor, f"создал промокод {name}: {amount} x{uses}")
-    send(peer_id, f"🎟 Промокод «{name}» создан.\n"
+    send(peer_id, f"🎫 Промокод «{name}» создан.\n"
                   f"Награда: {fmt_num(amount)} 💰\n"
                   f"Использований: {uses}\n"
                   f"Действует: {PROMO_TTL // 3600} ч.\n\n"
@@ -1457,7 +1444,7 @@ def activate_promo(peer_id, uid, name):
     promo["used_by"].append(uid)
     save_economy()
     left = promo["uses"] - len(promo["used_by"])
-    send(peer_id, f"🎟 Промокод «{promo['name']}» активирован!\n"
+    send(peer_id, f"🎫 Промокод «{promo['name']}» активирован!\n"
                   f"+{fmt_num(promo['amount'])} 💰\n"
                   f"💰 Баланс: {fmt_num(user['money'])}\n"
                   f"Осталось активаций: {left}")
@@ -1467,11 +1454,11 @@ def cmd_promo(msg, rest, slash):
     peer_id = msg["peer_id"]
     uid = msg["from_id"]
     args = rest.split()
-    create_usage = ("ℹ Создание: промокод НАЗВАНИЕ СУММА ИСПОЛЬЗОВАНИЙ\n"
+    create_usage = ("ℹ️ Создание: промокод НАЗВАНИЕ СУММА ИСПОЛЬЗОВАНИЙ\n"
                     "Пример: промокод Борз 1кк 1\n\nАктивация: промокод НАЗВАНИЕ")
 
     if not args:
-        send(peer_id, "ℹ Активировать промокод: промокод НАЗВАНИЕ")
+        send(peer_id, "ℹ️ Активировать промокод: промокод НАЗВАНИЕ")
     elif len(args) == 1:
         activate_promo(peer_id, uid, args[0])
     elif len(args) == 3:
@@ -1507,8 +1494,6 @@ def mines_coef(mines, opened, vip=False):
     if vip:
         coef *= VIP_WIN_BONUS
     return round(coef, 2)
-
-
 def mines_vip(game):
     return vip_active(get_user(game["owner"]))
 
@@ -1554,8 +1539,6 @@ def mines_pick_page(bet, uid):
         kb.add_callback_button(f"{m} 💣", VkKeyboardColor.SECONDARY,
                                payload={"cmd": "mines", "act": "start", "b": bet, "m": m, "o": uid})
     return text, kb.get_keyboard()
-
-
 def mines_final_text(game, user, head, hit=None, win=0):
     vip = mines_vip(game)
     coef = mines_coef(game["m"], len(game["opened"]), vip)
@@ -1594,7 +1577,7 @@ def cmd_mines(msg, rest, slash):
         bet = parse_amount(rest.split()[0], balance)
         if bet is None:
             if slash:
-                send(peer_id, "ℹ Использование: мины СТАВКА (например: мины 100к, мины 1кк, мины все)")
+                send(peer_id, "ℹ️ Использование: мины СТАВКА (например: мины 100к, мины 1кк, мины все)")
             return  # «мины на дороге» — обычная фраза
         err = check_bet(bet, balance)
         if err:
@@ -1610,7 +1593,7 @@ def cmd_mines(msg, rest, slash):
 
 
 # ---------------------- Мут ----------------------
-MUTE_USAGE = ("ℹ Использование: мут МИНУТЫ — ответом на сообщение участника\n"
+MUTE_USAGE = ("ℹ️ Использование: мут МИНУТЫ — ответом на сообщение участника\n"
               "Или: мут ID МИНУТЫ / мут @упоминание МИНУТЫ\n"
               "Пример: мут 30 (можно также 2ч, 1д)")
 
@@ -1664,7 +1647,7 @@ def cmd_unmute(msg, rest, slash):
     target, _ = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, "ℹ Использование: размут — ответом на сообщение, либо размут ID / @упоминание")
+            send(peer_id, "ℹ️ Использование: размут — ответом на сообщение, либо размут ID / @упоминание")
         return
 
     names = get_names([target])
@@ -1689,7 +1672,7 @@ def punish_cmd(msg, rest, slash, ban):
     target, reason = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, f"ℹ Использование: {word} — ответом на сообщение [причина], "
+            send(peer_id, f"ℹ️ Использование: {word} — ответом на сообщение [причина], "
                           f"либо {word} ID / @упоминание [причина]\n"
                           f"Пример: {word} 123456789 спам")
         return
@@ -1740,8 +1723,6 @@ def cmd_kick(msg, rest, slash):
 
 def cmd_ban(msg, rest, slash):
     punish_cmd(msg, rest, slash, ban=True)
-
-
 def cmd_unban(msg, rest, slash):
     peer_id = msg["peer_id"]
     actor = msg["from_id"]
@@ -1752,7 +1733,7 @@ def cmd_unban(msg, rest, slash):
     target, _ = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, "ℹ Использование: разбан ID / @упоминание")
+            send(peer_id, "ℹ️ Использование: разбан ID / @упоминание")
         return
 
     names = get_names([target])
@@ -1835,13 +1816,11 @@ def cmd_delete(msg, rest, slash):
 
     if blocked:
         send(peer_id, f"⚠ Сообщений не удалено: {blocked} (у авторов уровень не ниже вашего).")
-
-
 # ---------------------- «права» ----------------------
 def rights_usage():
     roles = "\n".join(f"{lvl} — {name}" for lvl, name in ROLES.items() if lvl < 5)
     return (
-        "ℹ Использование команды:\n"
+        "ℹ️ Использование команды:\n"
         "права 1 ID — выдать роль по ID\n"
         "права 2 @упоминание — выдать роль по упоминанию\n"
         "права 2 (ответом на сообщение) — выдать роль автору сообщения\n"
@@ -1954,7 +1933,7 @@ def cmd_buy(msg, rest, slash):
     item = rest.strip().lower()
     if item not in ("вип", "vip"):
         if slash or not item:
-            send(peer_id, "ℹ Доступно: купить вип")
+            send(peer_id, "ℹ️ Доступно: купить вип")
         return
 
     user = get_user(uid)
@@ -2029,7 +2008,7 @@ def cmd_prefix(msg, rest, slash):
         deny(msg, rest, slash, f"⛔ Менять префикс могут {ROLES[MIN_LEVEL_TO_PREFIX]} и выше.")
         return
 
-    usage = ("ℹ Использование: префикс НОВЫЙ_ПРЕФИКС — ответом на сообщение участника\n"
+    usage = ("ℹ️ Использование: префикс НОВЫЙ_ПРЕФИКС — ответом на сообщение участника\n"
              "Или: префикс ID НОВЫЙ_ПРЕФИКС\nУбрать префикс: префикс -")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -2069,7 +2048,7 @@ def cmd_give_money(msg, rest, slash):
         deny(msg, rest, slash, f"⛔ Выдавать деньги могут {ROLES[MIN_LEVEL_TO_GIVE]} и выше.")
         return
 
-    usage = ("ℹ Использование: деньги СУММА — ответом на сообщение участника\n"
+    usage = ("ℹ️ Использование: деньги СУММА — ответом на сообщение участника\n"
              "Или: деньги ID СУММА\nПример: деньги 5кк")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -2096,7 +2075,7 @@ def cmd_give_exp(msg, rest, slash):
         deny(msg, rest, slash, f"⛔ Выдавать опыт могут {ROLES[MIN_LEVEL_TO_GIVE]} и выше.")
         return
 
-    usage = ("ℹ Использование: опыт ЧИСЛО — ответом на сообщение участника\n"
+    usage = ("ℹ️ Использование: опыт ЧИСЛО — ответом на сообщение участника\n"
              f"Или: опыт ID ЧИСЛО\nПример: опыт 50 (максимум за раз: {MAX_EXP_GRANT})")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -2116,13 +2095,11 @@ def cmd_give_exp(msg, rest, slash):
     if level_note:
         text += "\n\n" + level_note
     send(peer_id, text)
-
-
 # ---------------------- Передача денег ----------------------
 def cmd_transfer(msg, rest, slash):
     peer_id = msg["peer_id"]
     uid = msg["from_id"]
-    usage = (f"ℹ Использование: передать СУММА — ответом на сообщение участника\n"
+    usage = (f"ℹ️ Использование: передать СУММА — ответом на сообщение участника\n"
              f"Или: передать ID СУММА\n"
              f"Сумма: от {fmt_num(TRANSFER_MIN)} до {fmt_num(TRANSFER_MAX)} 💰\n"
              f"Пауза между переводами: {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)")
@@ -2164,8 +2141,6 @@ def cmd_transfer(msg, rest, slash):
     log_action(peer_id, uid, f"передал {amount} → {target}")
     names = get_names([uid, target])
     send(peer_id, f"💸 {mention(uid, names)} передал {mention(target, names)}: {fmt_num(amount)} 💰")
-
-
 # ---------------------- Дуэль ----------------------
 def prune_duels():
     now = time.time()
@@ -2176,7 +2151,7 @@ def prune_duels():
 def cmd_duel(msg, rest, slash):
     peer_id = msg["peer_id"]
     uid = msg["from_id"]
-    usage = ("ℹ Использование: дуэль СУММА — ответом на сообщение соперника\n"
+    usage = ("ℹ️ Использование: дуэль СУММА — ответом на сообщение соперника\n"
              "Или: дуэль ID СУММА\nПример: дуэль 1кк")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -2233,7 +2208,7 @@ def duel_page(duel, event_line=""):
     if event_line:
         lines += ["", event_line]
     lines += ["", f"Ход: {mention(duel['turn'], names)} — нажмите «Выстрелить».",
-              f"⏱ На выстрел — {DUEL_SHOT_SECONDS} сек., иначе победа соперника."]
+              f"⏱️ На выстрел — {DUEL_SHOT_SECONDS} сек., иначе победа соперника."]
     kb = VkKeyboard(inline=True)
     kb.add_callback_button("🔫 Выстрелить", VkKeyboardColor.NEGATIVE,
                            {"cmd": "duel", "act": "shoot", "id": duel["id"]})
@@ -2345,7 +2320,7 @@ def cmd_warn(msg, rest, slash):
     target, reason = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, "ℹ Использование: варн [причина] — ответом на сообщение участника\n"
+            send(peer_id, "ℹ️ Использование: варн [причина] — ответом на сообщение участника\n"
                           "Или: варн ID [причина]\n"
                           f"{WARNS_LIMIT}/{WARNS_LIMIT} предупреждений — кик из беседы.")
         return
@@ -2353,7 +2328,6 @@ def cmd_warn(msg, rest, slash):
     if err:
         send(peer_id, err)
         return
-
     reason = reason[:200] or "не указана"
     warns = punish["warns"].setdefault(str(peer_id), {}).setdefault(str(target), [])
     warns.append({"by": actor, "reason": reason, "t": int(time.time())})
@@ -2386,7 +2360,7 @@ def cmd_unwarn(msg, rest, slash):
     target, _ = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, "ℹ Использование: снять варн — ответом на сообщение участника, либо снять варн ID")
+            send(peer_id, "ℹ️ Использование: снять варн — ответом на сообщение участника, либо снять варн ID")
         return
 
     names = get_names([target])
@@ -2446,8 +2420,6 @@ def cmd_timeout(msg, rest, slash):
     send(peer_id, f"🤫 Режим тишины включён{period}.\n"
                   "Писать могут только модераторы, сообщения остальных удаляются.\n"
                   "Выключить: timeout")
-
-
 # ---------------------- Топ дня, итоги и история ----------------------
 def today_str():
     return datetime.now().strftime("%Y-%m-%d")
@@ -2585,7 +2557,7 @@ def build_commands_page(peer_id, page, opener_id):
         for name, cmds in COMMAND_CATEGORIES:
             lines.append(f"{name} — " + ", ".join(cmd_label(c) for c, _ in cmds))
         if get_level(peer_id, opener_id) >= MIN_LEVEL_HELP:
-            lines += ["", "🛡 Команды модераторов — «хелп»."]
+            lines += ["", "🛡️ Команды модераторов — «хелп»."]
         kb = VkKeyboard(inline=True)
         for i, (name, _) in enumerate(COMMAND_CATEGORIES, 1):
             if i > 1 and (i - 1) % 2 == 0:
@@ -2635,7 +2607,6 @@ def handle_dm(msg):
         return
     peer_id = msg["peer_id"]
     text = (msg.get("text") or "").strip()
-
     if uid == OWNER_ID:
         if owner_dm_command(msg, text):
             return
@@ -2651,7 +2622,7 @@ def handle_dm(msg):
     mode = economy["report_mode"].get(str(uid))
     if not mode or mode["until"] < time.time():
         economy["report_mode"].pop(str(uid), None)
-        send(peer_id, "ℹ Чтобы отправить репорт, напишите «репорт» в беседе, где есть этот бот, "
+        send(peer_id, "ℹ️ Чтобы отправить репорт, напишите «репорт» в беседе, где есть этот бот, "
                       "а потом пришлите текст сюда.")
         return
     if not text:
@@ -2727,8 +2698,6 @@ def log_message(msg, tag=""):
     if tag:
         text += f" ({tag})"
     log_event("msg", msg["peer_id"], msg["from_id"], text)
-
-
 def read_log(day):
     start = datetime.strptime(day, "%Y-%m-%d").timestamp()
     with DB_LOCK:
@@ -2776,7 +2745,6 @@ def cmd_logs(msg, rest, slash):
             lines.append(f"{t} ⚙ [{chat}] {e['x']}")
         else:
             lines.append(f"{t} ⚙ [{chat}] id{e['u']}: {e['x']}")
-
     chunks, cur = [], ""
     for line in lines:
         if len(cur) + len(line) + 1 > 3500:
@@ -2822,8 +2790,6 @@ def tick_loop():
                 prune_promos()
         except Exception as e:
             print(f"Ошибка таймера: {e!r}")
-
-
 def send_get_cmid(peer_id, text, keyboard=None, attachment=None):
     """Отправляет сообщение и возвращает его conversation_message_id (чтобы потом редактировать)."""
     res = vk.messages.send(
@@ -2871,7 +2837,7 @@ def show_own_prefix(msg):
     lvl, name, _, _ = player_level(user["exp"])
     role = ROLES.get(get_level(peer_id, uid), "Участник")
     lines = [
-        "🏷 Ваш префикс",
+        "🏷️ Ваш префикс",
         "",
         f"Префикс: {user.get('prefix') or 'нет'}",
         f"Уровень: {lvl} — {name}",
@@ -2990,7 +2956,7 @@ def cmd_take_money(msg, rest, slash):
         deny(msg, rest, slash, f"⛔ Забирать деньги могут {ROLES[MIN_LEVEL_TO_GIVE]} и выше.")
         return
 
-    usage = ("ℹ Использование: забрать СУММА — ответом на сообщение участника\n"
+    usage = ("ℹ️ Использование: забрать СУММА — ответом на сообщение участника\n"
              "Или: забрать ID СУММА / забрать @упоминание СУММА\nПример: забрать 5кк (или забрать все)")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -3011,8 +2977,6 @@ def cmd_take_money(msg, rest, slash):
         return
     summary = f"забрать деньги: {fmt_num(amount)} 💰 у {mention(target, names)}"
     submit_action(peer_id, actor, "take", {"target": target, "amount": amount}, summary)
-
-
 # ---------------------- Топ: сообщения / баланс ----------------------
 def top_tabs_keyboard(page, opener_id):
     kb = VkKeyboard(inline=True)
@@ -3198,7 +3162,6 @@ def _roulette_frame(wheel, angle, result=None):
         box = d.textbbox((0, 0), str(result), font=font)
         d.text((c - (box[2] - box[0]) / 2 - box[0], c - (box[3] - box[1]) / 2 - box[1]),
                str(result), font=font, fill=(255, 255, 255, 255))
-
     d.polygon([(c - 20 * k, 3), (c + 20 * k, 3), (c, 52 * k)], fill=(225, 30, 30, 255), outline=gold)
     return canvas.convert("RGB")
 
@@ -3293,7 +3256,6 @@ def cmd_roulette(msg, rest, slash):
             return
         roulette_spin(peer_id, uid, kind, bet)
         return
-
     bet = parse_amount(parts[0], balance)      # рулетка 1кк → четыре кнопки
     if bet is None:
         if slash:
@@ -3438,7 +3400,7 @@ def do_take_exp(peer_id, actor, target, amount):
     new_level, new_name, _, _ = player_level(user["exp"])
     text = f"⭐ У {mention(target, names)} забрано {take} exp\nОпыт: {exp_text(user['exp'])}"
     if new_level < old_level:
-        text += f"\n⬇ Уровень понижен: {new_level} — {new_name}"
+        text += f"\n⬇️ Уровень понижен: {new_level} — {new_name}"
     send(peer_id, text)
 
 
@@ -3460,7 +3422,7 @@ def cmd_take_exp(msg, rest, slash):
         deny(msg, rest, slash, f"⛔ Забирать опыт могут {ROLES[MIN_LEVEL_TO_GIVE]} и выше.")
         return
 
-    usage = ("ℹ Использование: забрать опыт ЧИСЛО — ответом на сообщение участника\n"
+    usage = ("ℹ️ Использование: забрать опыт ЧИСЛО — ответом на сообщение участника\n"
              "Или: забрать опыт ID ЧИСЛО\nПример: забрать опыт 50 (или забрать опыт все)")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -3527,8 +3489,6 @@ def mines_finish(game, user, head, hit=None, win=0):
     """Конец игры: сообщение показывает итог без кнопок."""
     text = mines_final_text(game, user, head, hit=hit, win=win)
     with_retry(lambda: edit_message(game["peer"], game["cmid"], text))
-
-
 def refund_mines(game, text):
     user = get_user(game["owner"])
     user["money"] += game["bet"]
@@ -4044,17 +4004,16 @@ def make_profile_image():
             col = rnd.choice(((255, 255, 255), (255, 224, 90), (255, 150, 190)))
             d.ellipse((x - 5 * u, y - 5 * u, x + 5 * u, y + 5 * u), fill=col)
             d.ellipse((x - 2 * u, y - 2 * u, x + 2 * u, y + 2 * u), fill=(230, 150, 40))
-
         cx, cy, r = 450 * u, 250 * u, 78 * u                         # человечек
         ink = (22, 22, 22)
         d.ellipse((cx - 120 * u, 536 * u, cx + 120 * u, 566 * u), fill=(36, 104, 38))   # тень
         d.line([(cx, cy + r), (cx, 440 * u)], fill=ink, width=9 * u)                      # тело
         d.line([(cx, cy + r + 34 * u), (cx - 88 * u, 404 * u)], fill=ink, width=9 * u)    # руки
         d.line([(cx, cy + r + 34 * u), (cx + 88 * u, 404 * u)], fill=ink, width=9 * u)
-        d.line([(cx, 440 * u), (cx - 58 * u, 544 * u)], fill=ink, width=9 * u)            # ноги
-        d.line([(cx, 440 * u), (cx + 58 * u, 544 * u)], fill=ink, width=9 * u)
-        for px, py in ((cx - 88 * u, 404 * u), (cx + 88 * u, 404 * u), (cx - 58 * u, 544 * u),
-                       (cx + 58 * u, 544 * u), (cx, 440 * u)):
+        d.line([(cx, 440 * u), (cx - 74 * u, 544 * u)], fill=ink, width=9 * u)            # ноги
+        d.line([(cx, 440 * u), (cx + 74 * u, 544 * u)], fill=ink, width=9 * u)
+        for px, py in ((cx - 88 * u, 404 * u), (cx + 88 * u, 404 * u), (cx - 74 * u, 544 * u),
+                       (cx + 74 * u, 544 * u), (cx, 440 * u)):
             d.ellipse((px - 5 * u, py - 5 * u, px + 5 * u, py + 5 * u), fill=ink)
         d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(255, 255, 255), outline=ink, width=8 * u)   # голова
         for ex in (-26, 26):
@@ -4087,7 +4046,7 @@ def cmd_rep(msg, rest, slash, delta):
     target, tail = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, f"ℹ Использование: {word} — ответом на сообщение участника (можно с причиной)\n"
+            send(peer_id, f"ℹ️ Использование: {word} — ответом на сообщение участника (можно с причиной)\n"
                           f"Или: {word} ID\nПауза между изменениями репутации — {REP_COOLDOWN // 3600} ч.")
         return
     if target <= 0 or target == uid:
@@ -4134,7 +4093,7 @@ def cmd_freeze(msg, rest, slash):
         deny(msg, rest, slash, f"⛔ Замораживать могут {ROLES[MIN_LEVEL_TO_FREEZE]} и выше.")
         return
 
-    usage = ("ℹ Использование: заморозить — ответом на сообщение участника\n"
+    usage = ("ℹ️ Использование: заморозить — ответом на сообщение участника\n"
              "Или: заморозить ID [минуты]\nПример: заморозить 60 (на час). Без числа — до «разморозить».")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -4168,7 +4127,7 @@ def cmd_unfreeze(msg, rest, slash):
     target, _ = parse_target(msg, rest)
     if target is None:
         if slash or not rest.strip():
-            send(peer_id, "ℹ Использование: разморозить — ответом на сообщение, либо разморозить ID")
+            send(peer_id, "ℹ️ Использование: разморозить — ответом на сообщение, либо разморозить ID")
         return
     names = get_names([target])
     if punish["freezes"].pop(str(target), None) is None:
@@ -4430,7 +4389,7 @@ def owner_dm_command(msg, text):
             send(peer_id, f"❌ Не удалось восстановить базу: {e}")
         return True
     if doc:
-        send(peer_id, "ℹ Чтобы восстановить базу, пришлите файл копии ещё раз и подпишите его словом «восстановить».")
+        send(peer_id, "ℹ️ Чтобы восстановить базу, пришлите файл копии ещё раз и подпишите его словом «восстановить».")
         return True
     if low in ("бэкап", "backup"):
         ok = send_backup_to_owner("по запросу")
@@ -4440,47 +4399,31 @@ def owner_dm_command(msg, text):
     return False
 
 
-# ---------------------- Персонаж: одежда по отдельности, поле и дом ----------------------
+# ---------------------- Персонаж: футболка и обувь ----------------------
 KK = 1_000_000
-SHOP_SLOTS = ("cap", "tee", "pants", "shoes", "field", "house")
-SHOP_TITLES = {"cap": "🧢 Кепки", "tee": "👕 Футболки", "pants": "👖 Штаны",
-               "shoes": "👟 Обувь", "field": "🌍 Поле", "house": "🏠 Дом"}
+ART_VERSION = 5   # версия рисунков: при изменении старые картинки (кэш и загрузки в VK) обновляются сами
+SHOP_SLOTS = ("tee", "shoes")
+SHOP_TITLES = {"tee": "👕 Футболка", "shoes": "👟 Обувь"}
 # id: (раздел, название, цена в кк, описание)
 SHOP_ITEMS = {
-    "cap1": ("cap", "Чёрная кепка «Тень»", 100, "Чёрная кепка с белой полоской"),
-    "cap2": ("cap", "Панама «Север»", 250, "Чёрная панама с широкими полями"),
-    "cap3": ("cap", "Шапка «Ночь»", 200, "Тёплая чёрная шапка-бини"),
-    "cap4": ("cap", "Кепка «Песок»", 200, "Бежевая кепка с тёмным козырьком"),
-    "tee1": ("tee", "Футболка «Облако»", 200, "Белая футболка с принтом-облаком"),
-    "tee2": ("tee", "Футболка «Череп»", 500, "Чёрная футболка с белым черепом"),
-    "tee3": ("tee", "Форма «Королевский клуб»", 500, "Белая форма с золотым гербом"),
-    "tee4": ("tee", "Футболка «Улыбка»", 300, "Чёрная футболка со стекающей улыбкой"),
-    "pants1": ("pants", "Карго «Тактик»", 500, "Чёрные карго с накладными карманами"),
-    "pants2": ("pants", "Штаны «Бэгги»", 300, "Свободные серые штаны"),
-    "pants3": ("pants", "Шорты «Ночь»", 200, "Чёрные шорты до колена"),
-    "pants4": ("pants", "Спортивки «Полоса»", 100, "Бежевые штаны с белой полосой"),
+    "tee5": ("tee", "Футболка «Неко»", 400, "Белая футболка с аниме-девушкой"),
     "shoes1": ("shoes", "Кроссовки «Красный дракон»", 500, "Красные кроссовки с чёрной вставкой"),
     "shoes2": ("shoes", "Кроссовки «Панда»", 500, "Чёрно-белые кроссовки"),
     "shoes3": ("shoes", "Сланцы «Лето»", 100, "Лёгкие чёрные сланцы"),
     "shoes4": ("shoes", "Кроссовки «Снег»", 250, "Белоснежные кроссовки"),
-    "field_earth": ("field", "Земля", 0, "Зелёный луг — есть у каждого"),
-    "field_jupiter": ("field", "Юпитер", 400, "Оранжевые полосы гигантской планеты"),
-    "house1": ("house", "Уютный дом", 600, "Комната с окном, диваном и ковром"),
 }
-
-
 def item_price(item_id):
     return SHOP_ITEMS[item_id][2] * KK
 
 
 def owned(user, item_id):
-    return item_id == "field_earth" or item_id in user.get("items", [])
+    return item_id in user.get("items", [])
 
 
 def equipped(user, item_id):
     slot = SHOP_ITEMS[item_id][0]
     cur = user.get("equip", {}).get(slot)
-    return cur == item_id or (slot == "field" and item_id == "field_earth" and not cur)
+    return cur == item_id
 
 
 class _Pen:
@@ -4488,7 +4431,7 @@ class _Pen:
 
     def __init__(self, img, scale, ox=0.0, oy=0.0):
         from PIL import ImageDraw
-        self.d, self.s, self.ox, self.oy = ImageDraw.Draw(img), scale, ox, oy
+        self.img, self.d, self.s, self.ox, self.oy = img, ImageDraw.Draw(img), scale, ox, oy
 
     def _kw(self, kw):
         kw = dict(kw)
@@ -4513,12 +4456,18 @@ class _Pen:
 
     def line(self, pts, **kw):
         self.d.line(self._pts(pts), **self._kw(kw))
-
     def arc(self, b, a0, a1, **kw):
         self.d.arc(self._box(b), a0, a1, **self._kw(kw))
 
     def pie(self, b, a0, a1, **kw):
         self.d.pieslice(self._box(b), a0, a1, **self._kw(kw))
+
+    def paste(self, im, b):
+        """Вставляет готовую картинку (RGBA) в рамку b — в тех же «виртуальных» координатах."""
+        from PIL import Image
+        x0, y0, x1, y1 = (int(round(v)) for v in self._box(b))
+        im = im.resize((max(1, x1 - x0), max(1, y1 - y0)), Image.LANCZOS)
+        self.img.paste(im, (x0, y0), im)
 
     def thick(self, a, b, w, fill):
         self.line([a, b], fill=fill, width=w)
@@ -4560,155 +4509,107 @@ def _bg_earth(p):
         x, y = rnd.randint(30, 1270), rnd.randint(hor + 50, 780)
         p.ell((x - 6, y - 6, x + 6, y + 6), fill=rnd.choice(((255, 255, 255), (255, 224, 90), (255, 150, 190))))
         p.ell((x - 2, y - 2, x + 2, y + 2), fill=(230, 150, 40))
-
-
-def _bg_jupiter(p):
-    hor = 400
-    for y in range(hor):
-        p.line([(0, y), (1300, y)], fill=_lerp((8, 6, 28), (84, 46, 84), (y / hor) ** 1.6), width=2)
-    import random as _r
-    rnd = _r.Random(11)
-    for _ in range(140):
-        x, y = rnd.randint(0, 1300), rnd.randint(0, hor - 30)
-        p.ell((x - 2, y - 2, x + 2, y + 2), fill=(255, 255, 255))
-    p.ell((960, 70, 1090, 200), fill=(236, 214, 110))            # спутник
-    p.ell((1000, 100, 1030, 130), fill=(206, 176, 70))
-    p.ell((180, 120, 235, 175), fill=(190, 200, 230))            # маленькая луна
-    bands = [(214, 160, 100), (240, 214, 170), (178, 100, 62), (226, 186, 130), (140, 84, 52), (236, 200, 150)]
-    y, i = hor, 0
-    import math
-    while y < 800:
-        hgt = 36 + 20 * (i % 3)
-        col = bands[i % len(bands)]
-        pts = [(x, y + 6 * math.sin(x / 90 + i)) for x in range(0, 1301, 25)]
-        p.poly(pts + [(1300, y + hgt + 10), (0, y + hgt + 10)], fill=col)
-        y += hgt
-        i += 1
-    p.ell((160, 560, 440, 690), fill=(158, 60, 40))               # Большое красное пятно
-    p.ell((190, 580, 410, 670), fill=(188, 84, 52))
-    p.ell((250, 605, 350, 645), fill=(150, 56, 38))
-    p.line([(0, hor), (1300, hor)], fill=(250, 190, 120), width=3)
-
-
-def _bg_house(p, field):
-    for y in range(0, 560):
-        p.line([(0, y), (1300, y)], fill=_lerp((236, 218, 190), (214, 190, 156), y / 560), width=2)
-    for y in range(560, 800):
-        p.line([(0, y), (1300, y)], fill=_lerp((150, 104, 62), (112, 74, 42), (y - 560) / 240), width=2)
-    for x in range(-200, 1500, 130):                              # доски пола
-        p.line([(x + (x // 130 % 2) * 20, 560), (x - 120, 800)], fill=(96, 62, 34), width=2)
-    p.rrect((0, 548, 1300, 566), 0, fill=(250, 244, 232))          # плинтус
-    p.ell((300, 705, 1000, 790), fill=(168, 60, 70))               # ковёр
-    p.ell((340, 718, 960, 778), fill=(200, 90, 96))
-    # окно с видом на текущее поле
-    p.rrect((130, 110, 450, 390), 8, fill=(250, 250, 246))
-    sky, ground = ((140, 196, 244), (110, 190, 90)) if field != "field_jupiter" else ((40, 24, 60), (206, 150, 96))
-    p.rrect((148, 128, 432, 372), 4, fill=sky)
-    p.poly([(148, 300), (260, 270), (340, 296), (432, 266), (432, 372), (148, 372)], fill=ground)
-    p.line([(290, 128), (290, 372)], fill=(250, 250, 246), width=10)
-    p.line([(148, 250), (432, 250)], fill=(250, 250, 246), width=10)
-    p.poly([(120, 100), (190, 100), (210, 400), (120, 400)], fill=(196, 70, 80))   # шторы
-    p.poly([(460, 100), (390, 100), (370, 400), (460, 400)], fill=(196, 70, 80))
-    p.rrect((800, 130, 1120, 330), 6, fill=(120, 80, 44))          # картина
-    p.rrect((818, 148, 1102, 312), 3, fill=(176, 214, 240))
-    p.poly([(818, 312), (900, 220), (960, 270), (1030, 200), (1102, 312)], fill=(92, 140, 96))
-    p.ell((1040, 160, 1080, 200), fill=(255, 236, 150))
-    p.rrect((880, 470, 1250, 640), 36, fill=(70, 98, 150))         # диван
-    p.rrect((880, 440, 1250, 520), 30, fill=(84, 114, 170))
-    p.rrect((900, 560, 1230, 640), 20, fill=(96, 126, 182))
-    p.rrect((60, 560, 150, 690), 10, fill=(190, 120, 70))          # горшок
-    for ang in (-50, -25, 0, 25, 50):
-        import math
-        x = 105 + 80 * math.sin(math.radians(ang))
-        y = 530 - 90 * math.cos(math.radians(ang))
-        p.poly([(105, 565), (x - 14, y), (x + 14, y + 6)], fill=(70, 150, 76))
-    p.line([(650, 0), (650, 60)], fill=(60, 50, 40), width=4)       # лампа
-    p.pie((580, 40, 720, 130), 180, 360, fill=(250, 226, 150))
+LEG_HIP = (650, 548)                  # таз: отсюда расходятся обе ноги
+LEG_FEET = ((558, 684), (742, 684))   # стопы: левая и правая, симметрично относительно оси тела
 
 
 def _legs(p):
-    p.thick((632, 548), (596, 684), 13, _INK)
-    p.thick((668, 548), (704, 684), 13, _INK)
-
-
-def _pants(p, kind):
-    cargo, grey, shorts, track = kind == "pants1", kind == "pants2", kind == "pants3", kind == "pants4"
-    col = (34, 34, 38) if cargo or shorts else (128, 128, 134) if grey else (214, 196, 160)
-    w = 60 if cargo else 78 if grey else 64 if shorts else 54
-    t = 0.45 if shorts else 1.0
-    for (hx, hy), (fx, fy) in (((632, 548), (596, 676)), ((668, 548), (704, 676))):
-        ex, ey = hx + (fx - hx) * t, hy + (fy - hy) * t
-        p.thick((hx, hy + 2), (ex, ey), w, col)
-        if cargo:
-            side = -1 if hx < 650 else 1
-            mx, my = hx + (fx - hx) * 0.45 + side * 22, hy + (fy - hy) * 0.45
-            p.rrect((mx - 17, my - 14, mx + 17, my + 22), 4, fill=(50, 50, 56), outline=(20, 20, 24), width=2)
-        if track:
-            side = -1 if hx < 650 else 1
-            p.line([(hx + side * 26, hy + 8), (ex + side * 23, ey - 4)], fill=(250, 250, 250), width=7)
-    p.rrect((592, 528, 708, 566), 8, fill=_lerp(col, (0, 0, 0), 0.25))   # пояс
-    if cargo:
-        p.rrect((640, 534, 660, 560), 3, fill=(180, 180, 186))
+    """Две прямые ноги, раздвинутые «домиком» от таза; на концах — обувь."""
+    for fx, fy in LEG_FEET:
+        p.thick(LEG_HIP, (fx, fy), 13, _INK)
 
 
 def _shoe(p, x, y, kind, flip):
+    """Обувь под ногой: носок наружу, пятки у центра — симметрично слева и справа."""
     f = -1 if flip else 1
-
     def X(dx):
         return x + f * dx
+    def box(x0, y0, x1, y1):
+        return (min(X(x0), X(x1)), y0, max(X(x0), X(x1)), y1)
     if kind == "shoes3":                                           # сланцы
-        p.rrect((min(X(-56), X(60)), y - 6, max(X(-56), X(60)), y + 16), 10, fill=(30, 30, 34))
-        p.poly([(X(-6), y - 4), (X(30), y - 4), (X(22), y - 26), (X(2), y - 26)], fill=(236, 236, 236))
+        p.rrect(box(-34, y - 6, 66, y + 16), 10, fill=(30, 30, 34))
+        p.poly([(X(-4), y - 4), (X(30), y - 4), (X(22), y - 26), (X(2), y - 26)], fill=(236, 236, 236))
         return
     upper, accent, sole = {
         "shoes1": ((206, 38, 38), (24, 24, 28), (250, 250, 250)),
         "shoes2": ((250, 250, 250), (28, 28, 32), (28, 28, 32)),
         "shoes4": ((252, 252, 252), (196, 200, 210), (236, 238, 244)),
     }[kind]
-    p.poly([(X(-52), y + 6), (X(-44), y - 30), (X(-14), y - 38), (X(16), y - 22), (X(66), y - 4), (X(66), y + 8)],
+    p.poly([(X(-34), y + 6), (X(-30), y - 28), (X(-8), y - 36), (X(18), y - 22), (X(66), y - 4), (X(66), y + 8)],
            fill=upper, outline=(30, 30, 34), width=2)
-    p.poly([(X(-52), y + 6), (X(-44), y - 30), (X(-30), y - 34), (X(-30), y + 6)], fill=accent)           # пятка
-    p.poly([(X(28), y - 16), (X(66), y - 4), (X(66), y + 8), (X(24), y + 8)], fill=accent if kind == "shoes2" else upper)
-    p.line([(X(-20), y - 24), (X(26), y - 6)], fill=(255, 255, 255) if kind != "shoes4" else (200, 204, 214), width=5)
-    p.rrect((min(X(-58), X(70)), y + 6, max(X(-58), X(70)), y + 24), 8, fill=sole, outline=(30, 30, 34), width=2)
+    p.poly([(X(-34), y + 6), (X(-30), y - 28), (X(-16), y - 31), (X(-16), y + 6)], fill=accent)           # пятка
+    p.poly([(X(32), y - 14), (X(66), y - 4), (X(66), y + 8), (X(28), y + 8)], fill=accent if kind == "shoes2" else upper)
+    p.line([(X(-8), y - 24), (X(26), y - 8)], fill=(255, 255, 255) if kind != "shoes4" else (200, 204, 214), width=5)
+    p.rrect(box(-38, y + 6, 70, y + 24), 8, fill=sole, outline=(30, 30, 34), width=2)
+
+
+ARM_O = (650, 398)       # плечо палочки-руки (общая точка для рук и футболки)
+ARM_D = (112, 118)       # куда уходит правая рука (левая — зеркально)
+TEE_UP = 2               # футболка выше на столько px
+TEE_HALF = 76            # полуширина корпуса — оверсайз (раньше 61)
+TEE_SLEEVE_W = 34        # полуширина рукава (раньше 27)
+TEE_SLEEVE_LEN = 124     # длина рукава вдоль руки (раньше 100)
+TEE_HEM = 580            # низ футболки (оверсайз: закрывает таз, ноги выходят из-под неё)
+TEE_ART_HALF = 68        # половина ширины картинки на груди
+TEE_ART_TOP = 428        # верх картинки (по центру груди)
+
+
+def _tee_geometry():
+    """Контур футболки считается от самой руки: рукав ложится точно на руку, всё зеркально."""
+    import math
+    ox, oy = ARM_O
+    L = math.hypot(*ARM_D)
+    ux, uy = ARM_D[0] / L, ARM_D[1] / L        # вдоль руки
+    nx, ny = uy, -ux                            # поперёк руки: вверх-наружу
+    w, t0, t1, tw = TEE_SLEEVE_W, 18, TEE_SLEEVE_LEN, TEE_HALF
+    hem = TEE_HEM
+
+    def on_arm(t, k):
+        return (ox + ux * t + nx * k, oy + uy * t + ny * k)
+
+    def cap(t):                                 # линия манжеты: от внешнего края рукава до бока корпуса
+        outer = on_arm(t, w)
+        s = (outer[0] - (ox + tw)) / nx
+        return outer, (ox + tw, outer[1] - ny * s)
+
+    neck = on_arm(t0, w)
+    cuff, armpit = cap(t1)
+    mir = lambda pt: (2 * ox - pt[0], pt[1])
+    body = [mir(neck), neck, cuff, armpit, (ox + tw, hem), (ox - tw, hem),
+            mir(armpit), mir(cuff)]
+    return body, cap, mir, neck
+
+
+TEE_ART_FILE = "tee_neko.png"     # картинка принта: лежит рядом с bot.py
+_TEE_ART = {}
+
+
+def _tee_art():
+    """Картинка принта читается с диска один раз. Нет файла — футболка просто без принта."""
+    if "im" not in _TEE_ART:
+        try:
+            from PIL import Image
+            _TEE_ART["im"] = Image.open(os.path.join(BASE_DIR, TEE_ART_FILE)).convert("RGBA")
+        except Exception:
+            _TEE_ART["im"] = None
+    return _TEE_ART["im"]
 
 
 def _tee(p, kind):
-    white = kind in ("tee1", "tee3")
-    col = (248, 248, 250) if white else (28, 28, 32)
-    edge = (200, 200, 208) if white else (70, 70, 76)
-    body = [(612, 392), (560, 404), (498, 478), (544, 506), (582, 470), (584, 548), (716, 548),
-            (718, 470), (756, 506), (802, 478), (740, 404), (688, 392)]
+    import copy
+    col, edge = (248, 248, 250), (200, 200, 208)
+    cx = 650                                                                # ось тела — принт строго по ней
+    body, cap, mir, neck = _tee_geometry()
+    q = copy.copy(p)                                                        # тот же холст, сдвинутый вверх
+    q.oy = p.oy - TEE_UP * p.s
+    p = q
     p.poly(body, fill=col, outline=edge, width=3)
-    p.arc((622, 380, 678, 420), 0, 180, fill=edge, width=3)                 # горловина
-    if kind == "tee1":                                                      # облачко
-        for cx, cy, r in ((636, 478, 20), (664, 470, 26), (692, 480, 20)):
-            p.ell((cx - r, cy - r, cx + r, cy + r), fill=(150, 196, 240))
-        p.rrect((622, 480, 706, 498), 8, fill=(150, 196, 240))
-    elif kind == "tee2":                                                    # череп
-        p.ell((620, 428, 680, 486), fill=(244, 244, 244))
-        p.rrect((630, 474, 670, 506), 6, fill=(244, 244, 244))
-        p.ell((632, 448, 648, 466), fill=(28, 28, 32))
-        p.ell((652, 448, 668, 466), fill=(28, 28, 32))
-        p.poly([(646, 470), (654, 470), (650, 478)], fill=(28, 28, 32))
-        for x in (638, 650, 662):
-            p.line([(x, 488), (x, 506)], fill=(28, 28, 32), width=2)
-    elif kind == "tee3":                                                    # форма с гербом
-        for sx in (-1, 1):
-            p.line([(650 + sx * 70, 410), (650 + sx * 66, 548)], fill=(36, 60, 130), width=8)
-        p.poly([(640, 420), (660, 420), (664, 446), (650, 462), (636, 446)], fill=(236, 190, 60), outline=(150, 110, 20), width=2)
-        p.ell((644, 430, 656, 442), fill=(36, 60, 130))
-        p.arc((606, 386, 694, 424), 0, 180, fill=(36, 60, 130), width=6)
-        for sx in (-1, 1):
-            p.line([(650 + sx * 130, 470), (650 + sx * 100, 494)], fill=(36, 60, 130), width=8)
-    elif kind == "tee4":                                                    # стекающая улыбка
-        p.ell((620, 424, 682, 486), fill=(244, 244, 244))
-        p.ell((634, 444, 644, 456), fill=(28, 28, 32))
-        p.ell((658, 444, 668, 456), fill=(28, 28, 32))
-        p.arc((634, 450, 668, 476), 20, 160, fill=(28, 28, 32), width=4)
-        for x, ln in ((632, 26), (648, 40), (664, 22)):
-            p.line([(x, 486), (x, 486 + ln)], fill=(244, 244, 244), width=6)
-            p.ell((x - 5, 482 + ln, x + 5, 494 + ln), fill=(244, 244, 244))
+    top = neck[1]
+    p.arc((cx - 33, top - 15, cx + 33, top + 29), 0, 180, fill=edge, width=3)   # горловина
+    art = _tee_art()
+    if art is not None:                                                     # ваша картинка во всю грудь
+        w = 2 * TEE_ART_HALF
+        p.paste(art, (cx - TEE_ART_HALF, TEE_ART_TOP, cx + TEE_ART_HALF, TEE_ART_TOP + w * art.height / art.width))
 
 
 def _head(p, cy=255, r=96):
@@ -4719,60 +4620,30 @@ def _head(p, cy=255, r=96):
     p.arc((cx - 40, cy + 6, cx + 40, cy + 58), 25, 155, fill=_INK, width=6)
 
 
-def _cap(p, kind, cy=255):
-    cx = 650
-    if kind in ("cap1", "cap4"):
-        dome, brim = ((28, 28, 32), (14, 14, 16)) if kind == "cap1" else ((218, 196, 156), (96, 80, 58))
-        p.pie((cx - 104, cy - 120, cx + 104, cy + 60), 180, 360, fill=dome, outline=_INK, width=3)
-        p.poly([(cx + 20, cy - 54), (cx + 150, cy - 40), (cx + 142, cy - 24), (cx + 14, cy - 36)], fill=brim, outline=_INK, width=3)
-        p.ell((cx - 6, cy - 124, cx + 6, cy - 112), fill=brim)
-        p.arc((cx - 70, cy - 112, cx + 40, cy - 10), 200, 290, fill=(250, 250, 250) if kind == "cap1" else (96, 80, 58), width=7)
-    elif kind == "cap2":
-        p.pie((cx - 92, cy - 128, cx + 92, cy + 30), 180, 360, fill=(28, 28, 32), outline=_INK, width=3)
-        p.ell((cx - 140, cy - 62, cx + 140, cy - 18), fill=(24, 24, 28), outline=_INK, width=3)
-        p.line([(cx - 88, cy - 74), (cx + 88, cy - 74)], fill=(70, 70, 76), width=6)
-    elif kind == "cap3":
-        p.pie((cx - 100, cy - 132, cx + 100, cy + 50), 180, 360, fill=(36, 36, 40), outline=_INK, width=3)
-        p.rrect((cx - 102, cy - 56, cx + 102, cy - 16), 14, fill=(52, 52, 58), outline=_INK, width=3)
-        for x in range(cx - 90, cx + 91, 22):
-            p.line([(x, cy - 52), (x, cy - 20)], fill=(30, 30, 34), width=3)
-        p.ell((cx - 18, cy - 152, cx + 18, cy - 116), fill=(60, 60, 66))
-
-
 def render_avatar(equip, out_w=1040):
-    """Персонаж в выбранной одежде на выбранном поле (или в доме). Возвращает картинку 13:8."""
+    """Персонаж в футболке и обуви на зелёном лугу. Возвращает картинку 13:8."""
     from PIL import Image
     ss = 2
     scale = out_w * ss / 1300
     img = Image.new("RGB", (round(1300 * scale), round(800 * scale)))
     p = _Pen(img, scale)
-    field = equip.get("field") or "field_earth"
-    if equip.get("house"):
-        _bg_house(p, field)
-    elif field == "field_jupiter":
-        _bg_jupiter(p)
-    else:
-        _bg_earth(p)
+    _bg_earth(p)
 
     k = 1.2  # персонаж крупнее фона: ступни остаются на месте, голова и одежда лучше видны
     pc = _Pen(img, scale * k, ox=scale * (650 - 650 * k), oy=scale * (690 - 690 * k))
-    pc.ell((520, 668, 780, 706), fill=(30, 60, 30) if not equip.get("house") else (80, 52, 28))   # тень
+    pc.ell((470, 668, 830, 708), fill=(30, 60, 30))                 # тень
     _legs(pc)
-    if equip.get("pants"):
-        _pants(pc, equip["pants"])
-    for x, flip in ((596, True), (704, False)):
-        if equip.get("shoes"):
-            _shoe(pc, x, 686, equip["shoes"], flip)
+    for (fx, fy), flip in zip(LEG_FEET, (True, False)):             # носок смотрит наружу, пятка к центру
+        if equip.get("shoes") in SHOP_ITEMS:
+            _shoe(pc, fx, fy + 2, equip["shoes"], flip)
         else:
-            pc.ell((x - 9, 678, x + 9, 694), fill=_INK)
+            pc.ell((fx - 11, fy - 6, fx + 11, fy + 10), fill=_INK)
     pc.thick((650, 350), (650, 548), 13, _INK)                      # тело
-    pc.thick((650, 398), (538, 516), 13, _INK)                      # руки
-    pc.thick((650, 398), (762, 516), 13, _INK)
-    if equip.get("tee"):
+    for sx in (-1, 1):                                              # руки — те же, что у рукавов
+        pc.thick(ARM_O, (ARM_O[0] + sx * ARM_D[0], ARM_O[1] + ARM_D[1]), 13, _INK)
+    if equip.get("tee") in SHOP_ITEMS:
         _tee(pc, equip["tee"])
     _head(pc)
-    if equip.get("cap"):
-        _cap(pc, equip["cap"])
     return img.resize((out_w, round(out_w * 800 / 1300)), Image.LANCZOS)
 
 
@@ -4783,7 +4654,7 @@ _shop_sessions = {}          # (беседа, игрок) → сообщение
 
 def item_preview(peer_id, item_id):
     """Картинка карточки: персонаж с этим предметом. Рисуется и загружается в VK один раз."""
-    path = os.path.join(ROULETTE_CACHE_DIR, f"item_{item_id}.png")
+    path = os.path.join(ROULETTE_CACHE_DIR, f"item_{item_id}_v{ART_VERSION}.png")
     try:
         if not os.path.exists(path):
             os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
@@ -4791,23 +4662,79 @@ def item_preview(peer_id, item_id):
     except Exception as e:
         print(f"Не удалось нарисовать «{item_id}» (pip install pillow): {e!r}")
         return None
-    return cached_photo(peer_id, path, f"item_{item_id}")
+    return cached_photo(peer_id, path, f"item_{item_id}_v{ART_VERSION}")
+
+
+def ensure_art_version():
+    """Рисунок одежды обновился — забываем старые картинки: и файлы кэша, и загрузки в VK."""
+    if economy["media"].get("_art") == str(ART_VERSION):
+        return
+    for k in [k for k in economy["media"] if k.startswith(("item_", "avatar_"))]:
+        del economy["media"][k]
+    economy["media"]["_art"] = str(ART_VERSION)
+    save_economy()
+    if os.path.isdir(ROULETTE_CACHE_DIR):
+        for f in os.listdir(ROULETTE_CACHE_DIR):
+            if f.startswith(("item_", "avatar_")) and f"_v{ART_VERSION}." not in f:
+                try:
+                    os.remove(os.path.join(ROULETTE_CACHE_DIR, f))
+                except OSError:
+                    pass
+
+
+REFUND_REMOVED = True   # True — за убранные из магазина вещи вернуть деньги; False — не возвращать (вещи просто снимаются)
+REMOVED_ITEMS = {"cap1": 100, "cap2": 250, "cap3": 200, "cap4": 200,
+                 "tee1": 200, "tee2": 500, "tee3": 500, "tee4": 300,
+                 "pants1": 500, "pants2": 300, "pants3": 200, "pants4": 100,
+                 "field_jupiter": 400, "house1": 600}   # id: цена в кк
+
+
+def cleanup_removed_items():
+    """Один раз при запуске: убранные из магазина вещи (кепки, штаны, старые футболки, поля, дом)
+    снимаются с игроков, а деньги за купленное возвращаются (если REFUND_REMOVED = True)."""
+    if economy["media"].get("_removed_refund") == "1":
+        return
+    for rec in economy["users"].values():
+        items = rec.get("items", [])
+        if REFUND_REMOVED:
+            for pid, price in REMOVED_ITEMS.items():
+                while pid in items:
+                    items.remove(pid)
+                    rec["money"] = rec.get("money", 0) + price * KK
+        eq = rec.get("equip", {})
+        for slot in [s for s in eq if s not in SHOP_SLOTS or eq[s] in REMOVED_ITEMS]:
+            eq.pop(slot, None)
+    economy["media"]["_removed_refund"] = "1"
+    save_economy()
+
+
+def reset_staff_looks():
+    """Один раз: у всех модераторов (роли 1–4, кроме владельца) сбрасывается надетое —
+    вид как у обычных игроков, дальше сами покупают и надевают. Купленное остаётся."""
+    if economy["media"].get("_staff_reset") == "1":
+        return
+    staff = {int(uid) for chat in data.values() for uid, lvl in chat.items() if lvl in (1, 2, 3, 4)}
+    staff.discard(OWNER_ID)
+    for uid in staff:
+        rec = economy["users"].get(str(uid))
+        if rec and rec.get("equip"):
+            rec["equip"] = {}
+    economy["media"]["_staff_reset"] = "1"
+    save_economy()
 
 
 def avatar_attachment(peer_id, uid):
-    """Картинка профиля: у владельца и модераторов — свой персонаж, у игроков — в купленной одежде."""
+    """Картинка профиля: у владельца — свой персонаж, у всех остальных (и модераторов) — в купленной одежде."""
     if uid == OWNER_ID and os.path.exists(PROFILE_OWNER_IMAGE):
         return cached_photo(peer_id, PROFILE_OWNER_IMAGE, "pfowner")
-    if uid != OWNER_ID and get_level(peer_id, uid) >= 1 and os.path.exists(PROFILE_MOD_IMAGE):
-        return cached_photo(peer_id, PROFILE_MOD_IMAGE, "pfmod")
     equip = get_user(uid).get("equip", {})
     key = hashlib.md5("|".join(f"{s}={equip.get(s, '')}" for s in SHOP_SLOTS).encode()).hexdigest()[:10]
-    path = os.path.join(ROULETTE_CACHE_DIR, f"avatar_{key}.jpg")
+    path = os.path.join(ROULETTE_CACHE_DIR, f"avatar_{key}_v{ART_VERSION}.jpg")
     try:
         if not os.path.exists(path):
             os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
             render_avatar(equip, out_w=1040).convert("RGB").save(path, quality=90)
-        return cached_photo(peer_id, path, f"avatar_{key}")
+        return cached_photo(peer_id, path, f"avatar_{key}_v{ART_VERSION}")
     except Exception as e:
         print(f"Не удалось нарисовать персонажа (pip install pillow): {e!r}")
         return profile_attachment(peer_id)
@@ -4823,7 +4750,7 @@ def shop_buy(peer_id, uid, item_id):
         return f"Не хватает {fmt_num(price - user['money'])} 💰"
     user["money"] -= price
     user.setdefault("items", []).append(item_id)
-    user.setdefault("equip", {})[slot] = item_id  # купленное сразу надевается (дом — персонаж заходит в дом)
+    user.setdefault("equip", {})[slot] = item_id  # купленное сразу надевается
     save_economy()
     log_action(peer_id, uid, f"купил «{name}» за {price}")
     return f"✅ Куплено и надето: {name}"[:90]
@@ -4836,12 +4763,7 @@ def shop_wear(uid, item_id):
         return "Сначала купите эту вещь."
     eq = user.setdefault("equip", {})
     if equipped(user, item_id):
-        if item_id == "field_earth":
-            return "Это поле уже выбрано."
-        if slot == "field":
-            eq["field"] = "field_earth"
-        else:
-            eq.pop(slot, None)
+        eq.pop(slot, None)
         note = f"Снято: {name}"
     else:
         eq[slot] = item_id
@@ -4901,7 +4823,7 @@ def carousel_json(elements):
 def shop_menu_page(uid, mode):
     user = get_user(uid)
     if mode == "shop":
-        head = "🛍 Магазин аксессуаров"
+        head = "🛍️ Магазин аксессуаров"
         sub = "Выберите раздел — откроется лента товаров. Листайте её пальцем вправо ➡"
     else:
         head = "🎒 Мои аксессуары"
@@ -4914,7 +4836,7 @@ def shop_menu_page(uid, mode):
                                {"cmd": "shop", "a": "cat", "c": slot, "m": mode, "o": uid})
     kb.add_line()
     other = "mine" if mode == "shop" else "shop"
-    kb.add_callback_button("🎒 Мои аксессуары" if mode == "shop" else "🛍 Магазин", VkKeyboardColor.POSITIVE,
+    kb.add_callback_button("🎒 Мои аксессуары" if mode == "shop" else "🛍️ Магазин", VkKeyboardColor.POSITIVE,
                            {"cmd": "shop", "a": "mode", "m": other, "o": uid})
     return f"{head}\n💰 Баланс: {fmt_num(user['money'])}\n\n{sub}", kb.get_keyboard()
 
@@ -5144,14 +5066,15 @@ def handle_message(msg):
             send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате.")
             return
         handler(msg, rest, slash)
-
-
 def main():
     lock_socket = acquire_single_instance()  # держим порт, пока бот работает (второй экземпляр не запустится)
     prune_games()
     prune_duels()
     prune_roulette()
     migrate_legacy_mines()
+    ensure_art_version()
+    cleanup_removed_items()
+    reset_staff_looks()
     rollover_if_needed()
     notify_owner_startup()
     threading.Thread(target=tick_loop, daemon=True).start()  # таймеры дуэлей, рулетки, возврат ставок
