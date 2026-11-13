@@ -179,7 +179,6 @@ FISH_COMMON = 500_000           # обычная рыба — 500к
 FISH_MEDIUM_RANGE = (1_000_000, 2_000_000)   # хорошая — 1–2кк
 FISH_RARE_RANGE = (5_000_000, 10_000_000)    # редкая — 5–10кк
 FISH_IMAGE = _find("fishing.jpg")      # своя картинка: положите файл рядом с ботом
-PROFILE_OWNER_IMAGE = _find("profile_owner.jpg")   # картинка профиля владельца
 
 REP_COOLDOWN = 3600             # +реп / -реп: раз в час
 FREEZE_FOREVER = 10 * 365 * 86400   # «заморозить» без срока
@@ -1345,7 +1344,7 @@ def cmd_profile(msg, rest, slash):
         if not att:
             raise
         print(f"Не удалось отправить картинку профиля, шлю без неё: {err_text(e)}")
-        for name in ("profile", "pfowner", "avatar"):
+        for name in ("avatar",):
             drop_photo_cache(name)
         send(peer_id, text)
 
@@ -4468,9 +4467,7 @@ def reset_staff_looks():
 
 
 def avatar_attachment(peer_id, uid):
-    """Картинка профиля: у владельца — своя, у остальных — купленный персонаж. Нет персонажа — профиль без картинки."""
-    if uid == OWNER_ID and os.path.exists(PROFILE_OWNER_IMAGE):
-        return cached_photo(peer_id, PROFILE_OWNER_IMAGE, "pfowner")
+    """Картинка профиля: купленный персонаж. Нет персонажа — профиль без картинки (у всех одинаково)."""
     cur = get_user(uid).get("equip", {}).get("char")
     if cur in CHAR_FILES and os.path.exists(char_path(cur)):
         return cached_photo(peer_id, char_path(cur), f"avatar_{cur}_v{ART_SIG}")
