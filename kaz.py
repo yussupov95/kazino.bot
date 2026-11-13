@@ -68,7 +68,7 @@ def _find(name):
     return _here(name)
 
 # Токен лучше хранить в переменной окружения VK_TOKEN, а не в коде
-TOKEN = os.getenv("VK_TOKEN", "vk1.a.453fvcUgOGlgEKnNjhkCI7p1-fttv173SfcoigGFuV8rlXRSTMcnqPfQ4vCAmuPdKnBJQWIfzZri_Yql8ff2PPWkXJNlzMz4QP96upSU04PwpEEJrzLcS0jITmJu9VYx1MJJ1uoMDWZfLiVgS51MppTv6BplA0X6rjvrvcJBIkMgOWaAn5eSWDluaMZ3XiDPV5jd8gYaxHqhEerHazETyw")
+TOKEN = os.getenv("VK_TOKEN", "vk1.a.3xn0oZymw4uaWb0tombWt0xWKhES0N3yj6rhoGcWVOeQ02CXCo2Jsup1AEB8RFe7MV3NGLwQjXuxxwBixqC4Ll6mx1c3iDupPmBtHr9gT9_meUJRTvmhpBi42a1_MMGTUJd3L0pWcJeKkEAwJaJ7AeTQ9cXPfUF6UrIL3-kQGSZgxMtGIrWpjmZ21lpomp9FUW0XLySC2LW3Fq7Vs_XNqA")
 GROUP_ID = 242679541
 OWNER_ID = 609908758
 
@@ -119,7 +119,7 @@ PLAYER_LEVELS = [
 # --- Мины ---
 MINES_CELLS = 9                 # квадрат 3×3 (в inline-клавиатуре VK максимум 10 кнопок)
 MINES_MIN = 2                   # минимум мин
-MINES_COEF_BONUS = 1.05         # надбавка к коэффициенту «Мин» (1.0 — без надбавки)
+MINES_COEF_BONUS = 1.0          # надбавка к коэффициенту «Мин» (1.0 — без надбавки; было 1.05)
 MINES_MAX = 8                   # максимум мин (должен остаться хотя бы 1 алмаз)
 MINES_HOUSE_EDGE = 0.03         # комиссия казино 3%
 MIN_BET = 100
@@ -156,7 +156,7 @@ MAX_LOG_CHUNKS = 12             # максимум сообщений с лог�
 # --- VIP, паузы, таймеры ---
 VIP_DAYS = 30                   # VIP действует месяц
 PROMO_TTL = 86400               # промокод живёт 24 часа, потом удаляется
-VIP_WIN_BONUS = 1.25            # VIP: коэффициенты выигрышей ×1.25 (2x → 2.5x)
+VIP_WIN_BONUS = 1.15            # VIP: коэффициенты выигрышей ×1.15 (2x → 2.3x)
 TRANSFER_COOLDOWN = 60          # пауза между переводами (у VIP паузы нет)
 REPORT_COOLDOWN = 60            # пауза между репортами
 DUEL_SHOT_SECONDS = 10          # время на выстрел в дуэли
@@ -194,7 +194,7 @@ FISH_NAMES = {
 ROULETTE_ORDER = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24,
                   16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26]   # порядок на колесе
 ROULETTE_RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
-ROULETTE_PAYOUT = 2             # выигрыш x2 (VIP: x2.5)
+ROULETTE_PAYOUT = 2             # выигрыш x2 (VIP: x2.3)
 ROULETTE_BETS = {
     "красный": "red", "красное": "red", "красн": "red", "red": "red",
     "черный": "black", "черное": "black", "черн": "black", "black": "black",
@@ -2829,7 +2829,7 @@ def vip_active(user):
 
 
 def win_mult(uid):
-    """Во сколько раз VIP увеличивает коэффициент выигрыша (2x → 2.5x)."""
+    """Во сколько раз VIP увеличивает коэффициент выигрыша (2x → 2.3x)."""
     return VIP_WIN_BONUS if vip_active(get_user(uid)) else 1.0
 
 
@@ -4361,9 +4361,13 @@ SHOP_TITLES = {"char": "🎭 Персонажи"}
 SHOP_ITEMS = {
     "char1": ("char", "Сакура", 500, "Серебряные волосы, сад сакуры"),
     "char2": ("char", "Готика", 500, "Тёмная кофта и черепа"),
+    # СЕКРЕТНЫЙ: пока не куплен, в магазине он «???». Имя и описание ниже игрок увидит только после покупки.
+    "char3": ("char", "Секретная 18+", 1000, "твоя китагава)))"),
 }
-# файлы картинок лежат рядом с ботом (формат 13:8, как требует лента VK)
-CHAR_FILES = {"char1": "char1.jpg", "char2": "char2.jpg"}
+# файлы картинок лежат рядом с ботом. Любой размер: бот сам приведёт к 13:8, как требует лента VK
+CHAR_FILES = {"char1": "char1.jpg", "char2": "char2.jpg", "char3": "char3.jpg"}
+# секретные персонажи: в магазине появляются, только когда рядом с ботом лежит их файл (char3.jpg)
+SECRET_ITEMS = {"char3"}
 
 
 def item_price(item_id):
@@ -4395,11 +4399,96 @@ _shop_sessions = {}          # (беседа, игрок) → сообщение
 
 
 def char_path(item_id):
-    return _find(CHAR_FILES[item_id])
+    """Файл персонажа в формате 13:8 (лента VK другой формат не принимает).
+    Картинка другого размера целиком ставится по центру на размытый фон — один раз, копия лежит в cache."""
+    raw = _find(CHAR_FILES[item_id])
+    if not os.path.exists(raw):
+        return raw
+    try:
+        from PIL import Image, ImageFilter, ImageOps
+        im = ImageOps.exif_transpose(Image.open(raw)).convert("RGB")
+        w, h = im.size
+        if abs(w / h - 13 / 8) < 0.01:
+            return raw
+        out = os.path.join(ROULETTE_CACHE_DIR, f"fit_{item_id}_{int(os.path.getmtime(raw))}.jpg")
+        if not os.path.exists(out):
+            os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
+            W, H = 1040, 640
+            canvas = im.resize((W, H)).filter(ImageFilter.GaussianBlur(28))
+            k = min(W / w, H / h)
+            fg = im.resize((max(1, int(w * k)), max(1, int(h * k))), Image.LANCZOS)
+            canvas.paste(fg, ((W - fg.width) // 2, (H - fg.height) // 2))
+            canvas.save(out, quality=92)
+        return out
+    except Exception as e:
+        print(f"Не удалось подогнать {raw} под 13:8 (pip install pillow): {err_text(e)}")
+        return raw
 
 
-def item_preview(peer_id, item_id):
-    """Картинка карточки в магазине: сам персонаж. Загружается в VK один раз."""
+def is_secret_hidden(user, item_id):
+    """Секретный персонаж, которого у игрока ещё нет: его название и картинка скрыты."""
+    return item_id in SECRET_ITEMS and not owned(user, item_id)
+
+
+def item_view(user, item_id):
+    """(название, описание) для показа игроку: пока секретный не куплен — «???»."""
+    _, name, _, desc = SHOP_ITEMS[item_id]
+    if is_secret_hidden(user, item_id):
+        return "???", "Секретный персонаж. Что внутри — узнаете после покупки"
+    return name, desc
+
+
+def secret_ready(item_id):
+    """Секретного персонажа можно продавать, только если его картинка на месте."""
+    return item_id not in SECRET_ITEMS or os.path.exists(_find(CHAR_FILES[item_id]))
+
+
+def secret_image_path():
+    """Картинка-загадка «?» для карточки секретного персонажа. Рисуется один раз, лежит в cache."""
+    path = os.path.join(ROULETTE_CACHE_DIR, "secret_q.jpg")
+    if os.path.exists(path):
+        return path
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+        os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
+        W, H = 1040, 640
+        img = Image.new("RGB", (W, H))
+        d = ImageDraw.Draw(img)
+        for y in range(H):                                   # тёмный фиолетовый фон
+            t = y / H
+            d.line([(0, y), (W, y)], fill=(int(30 + 26 * t), int(14 + 12 * t), int(56 + 44 * t)))
+        rnd = random.Random(13)
+        for _ in range(70):                                  # звёздочки
+            x, y, r = rnd.randint(0, W), rnd.randint(0, H), rnd.choice((1, 2, 2, 3))
+            d.ellipse((x - r, y - r, x + r, y + r), fill=(190, 170, 255))
+        glow = Image.new("RGB", (W, H), (0, 0, 0))           # мягкое свечение за знаком вопроса
+        g = ImageDraw.Draw(glow)
+        cx = W // 2
+        g.ellipse((cx - 230, 70, cx + 230, 570), fill=(70, 40, 140))
+        glow = glow.filter(ImageFilter.GaussianBlur(70))
+        img = Image.blend(img, Image.composite(glow, img, glow.convert("L")), 0.8)
+        d = ImageDraw.Draw(img)
+        col, wd = (238, 228, 255), 44
+        r = wd // 2
+        cy, R = 210, 98                                                     # центр дуги и радиус по центру линии
+        ex, ey = cx + int(R * math.cos(math.radians(45))), cy + int(R * math.sin(math.radians(45)))
+        d.arc((cx - R - r, cy - R - r, cx + R + r, cy + R + r), 180, 45, fill=col, width=wd)   # крючок
+        d.line([(ex, ey), (cx, 345), (cx, 405)], fill=col, width=wd, joint="curve")             # изгиб и ножка
+        for px, py in ((cx - R, cy), (ex, ey), (cx, 345), (cx, 405)):                          # скруглённые концы и стыки
+            d.ellipse((px - r, py - r, px + r, py + r), fill=col)
+        d.ellipse((cx - 30, 456, cx + 30, 516), fill=col)                                      # точка
+        img.save(path, quality=90)
+        return path
+    except Exception as e:
+        print(f"Не удалось нарисовать картинку-загадку (pip install pillow): {err_text(e)}")
+        return None
+
+
+def item_preview(peer_id, item_id, hidden=False):
+    """Картинка карточки в магазине: сам персонаж (у секретного, пока не куплен, — «?»). Загружается в VK один раз."""
+    if hidden:
+        path = secret_image_path()
+        return cached_photo(peer_id, path, f"item_secret_v{ART_VERSION}") if path else None
     path = char_path(item_id)
     if not os.path.exists(path):
         print(f"Нет файла персонажа: {path}")
@@ -4479,6 +4568,8 @@ def shop_buy(peer_id, uid, item_id):
     user = get_user(uid)
     if owned(user, item_id):
         return f"Уже куплено: {name}"
+    if not secret_ready(item_id):
+        return "Пока недоступно."
     price = item_price(item_id)
     if user["money"] < price:
         return f"Не хватает {fmt_num(price - user['money'])} 💰"
@@ -4486,7 +4577,9 @@ def shop_buy(peer_id, uid, item_id):
     user.setdefault("items", []).append(item_id)
     user.setdefault("equip", {})[slot] = item_id  # купленное сразу надевается
     save_economy()
-    log_action(peer_id, uid, f"купил «{name}» за {price}")
+    log_action(peer_id, uid, f"купил «{'секретного персонажа' if item_id in SECRET_ITEMS else name}» за {price}")
+    if item_id in SECRET_ITEMS:
+        return f"🎉 Секрет открыт! Куплено и надето: {name}"[:90]
     return f"✅ Куплено и надето: {name}"[:90]
 
 
@@ -4508,7 +4601,7 @@ def shop_wear(uid, item_id):
 
 def shop_items(uid, slot, mode):
     user = get_user(uid)
-    ids = [i for i, v in SHOP_ITEMS.items() if v[0] == slot]
+    ids = [i for i, v in SHOP_ITEMS.items() if v[0] == slot and (owned(user, i) or secret_ready(i))]
     return [i for i in ids if owned(user, i)] if mode == "mine" else ids
 
 
@@ -4532,7 +4625,7 @@ def shop_elements(peer_id, uid, slot, mode):
     user = get_user(uid)
     elements = []
     for item_id in shop_items(uid, slot, mode):
-        _, name, kk, desc = SHOP_ITEMS[item_id]
+        name, desc = item_view(user, item_id)
         own = owned(user, item_id)
         tail = "✅ Куплено" if own else f"{fmt_num(item_price(item_id))} 💰"
         label, payload = shop_button(uid, item_id, slot, mode, "c")
@@ -4542,7 +4635,7 @@ def shop_elements(peer_id, uid, slot, mode):
             "buttons": [{"action": {"type": "callback", "label": label[:36],
                                     "payload": json.dumps(payload, ensure_ascii=False)}}],
         }
-        att = item_preview(peer_id, item_id)
+        att = item_preview(peer_id, item_id, hidden=is_secret_hidden(user, item_id))
         if att:
             el["photo_id"] = att[len("photo"):]
             el["action"] = {"type": "open_photo"}
@@ -4580,8 +4673,8 @@ def shop_card(peer_id, uid, slot, mode, idx):
     ids = shop_items(uid, slot, mode)
     idx %= len(ids)
     item_id = ids[idx]
-    _, name, _, desc = SHOP_ITEMS[item_id]
     user = get_user(uid)
+    name, desc = item_view(user, item_id)
     state = "✅ Куплено" if owned(user, item_id) else f"Цена: {fmt_num(item_price(item_id))} 💰"
     text = (f"{SHOP_TITLES[slot]} ({idx + 1}/{len(ids)})\n\n{name}\n{desc}\n{state}\n"
             f"💰 Баланс: {fmt_num(user['money'])}")
@@ -4595,7 +4688,7 @@ def shop_card(peer_id, uid, slot, mode, idx):
     kb.add_callback_button(label, VkKeyboardColor.POSITIVE, payload)
     kb.add_line()
     kb.add_callback_button("✖ Закрыть", VkKeyboardColor.NEGATIVE, dict(base, a="close"))
-    return text, kb.get_keyboard(), item_preview(peer_id, item_id)
+    return text, kb.get_keyboard(), item_preview(peer_id, item_id, hidden=is_secret_hidden(user, item_id))
 
 
 def shop_open_category(peer_id, uid, slot, mode):
@@ -4800,6 +4893,8 @@ def handle_message(msg):
             send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате.")
             return
         handler(msg, rest, slash)
+
+
 def main():
     lock_socket = acquire_single_instance()  # держим порт, пока бот работает (второй экземпляр не запустится)
     prune_games()
@@ -4812,6 +4907,10 @@ def main():
     rollover_if_needed()
     notify_owner_startup()
     threading.Thread(target=tick_loop, daemon=True).start()  # таймеры дуэлей, рулетки, возврат ставок
+    print(f"Файл бота: {os.path.abspath(__file__)}")
+    print(f"Магазин: персонажи {', '.join(SHOP_ITEMS)} (версия рисунков {ART_VERSION})")
+    for _f in CHAR_FILES.values():
+        print(f"  картинка {_f}: " + (f"найдена ({_find(_f)})" if os.path.exists(_find(_f)) else "НЕ НАЙДЕНА — положите рядом с ботом"))
     print("Бот запущен")
     try:
         while True:
