@@ -4362,12 +4362,18 @@ SHOP_ITEMS = {
     "char1": ("char", "Сакура", 500, "Серебряные волосы, сад сакуры"),
     "char2": ("char", "Готика", 500, "Тёмная кофта и черепа"),
     # СЕКРЕТНЫЙ: пока не куплен, в магазине он «???». Имя и описание ниже игрок увидит только после покупки.
-    "char3": ("char", "Секретная 18+", 1000, "твоя ах-ля)))"),
+    "char3": ("char", "Секретная", 1000, "Тот самый секретный персонаж"),
+    # ГИФКА: в магазине показывается первый кадр, в профиле у купившего — анимация. Имя и описание поменяйте на свои.
+    "char4": ("char", "китагава ", 2000, "🎞 Анимированный"),
 }
 # файлы картинок лежат рядом с ботом. Любой размер: бот сам приведёт к 13:8, как требует лента VK
-CHAR_FILES = {"char1": "char1.jpg", "char2": "char2.jpg", "char3": "char3.jpg"}
+CHAR_FILES = {"char1": "char1.jpg", "char2": "char2.jpg", "char3": "char3.jpg", "char4": "char4.gif"}
 # секретные персонажи: в магазине появляются, только когда рядом с ботом лежит их файл (char3.jpg)
 SECRET_ITEMS = {"char3"}
+# гифки: в профиле уходят как документ (анимация), в ленте магазина показывается первый кадр
+GIF_ITEMS = {"char4"}
+# товары, которые продаются, только когда их файл лежит рядом с ботом
+FILE_REQUIRED = SECRET_ITEMS | GIF_ITEMS
 
 
 def item_price(item_id):
@@ -4400,15 +4406,16 @@ _shop_sessions = {}          # (беседа, игрок) → сообщение
 
 def char_path(item_id):
     """Файл персонажа в формате 13:8 (лента VK другой формат не принимает).
-    Картинка другого размера целиком ставится по центру на размытый фон — один раз, копия лежит в cache."""
+    Картинка другого размера целиком ставится по центру на размытый фон — один раз, копия лежит в cache.
+    Для гифки это превью из первого кадра (сама гифка уходит только в профиль)."""
     raw = _find(CHAR_FILES[item_id])
     if not os.path.exists(raw):
         return raw
     try:
         from PIL import Image, ImageFilter, ImageOps
-        im = ImageOps.exif_transpose(Image.open(raw)).convert("RGB")
+        im = ImageOps.exif_transpose(Image.open(raw)).convert("RGB")   # у гифки — первый кадр
         w, h = im.size
-        if abs(w / h - 13 / 8) < 0.01:
+        if item_id not in GIF_ITEMS and abs(w / h - 13 / 8) < 0.01:
             return raw
         out = os.path.join(ROULETTE_CACHE_DIR, f"fit_{item_id}_{int(os.path.getmtime(raw))}.jpg")
         if not os.path.exists(out):
@@ -4438,9 +4445,9 @@ def item_view(user, item_id):
     return name, desc
 
 
-def secret_ready(item_id):
-    """Секретного персонажа можно продавать, только если его картинка на месте."""
-    return item_id not in SECRET_ITEMS or os.path.exists(_find(CHAR_FILES[item_id]))
+def char_ready(item_id):
+    """Секретного персонажа и гифку можно продавать, только если их файл на месте."""
+    return item_id not in FILE_REQUIRED or os.path.exists(_find(CHAR_FILES[item_id]))
 
 
 def secret_image_path():
@@ -4555,9 +4562,31 @@ def reset_staff_looks():
     save_economy()
 
 
+def cached_doc(peer_id, path, name, title):
+    """Загружает гифку в VK один раз (как документ, чтобы она двигалась) и запоминает attachment."""
+    key = f"{name}_{int(os.path.getmtime(path))}"
+    cached = economy["media"].get(key)
+    if cached:
+        return cached
+    try:
+        res = vk_upload.document_message(path, title=title, peer_id=peer_id)
+        doc = res.get("doc", res)
+        att = f"doc{doc['owner_id']}_{doc['id']}"
+        for old in [k for k in economy["media"] if k.startswith(name + "_")]:
+            del economy["media"][old]
+        economy["media"][key] = att
+        save_economy()
+        return att
+    except Exception as e:
+        print(f"Не удалось загрузить гифку «{name}» (у токена должно быть право «Документы»): {err_text(e)}")
+        return None
+
+
 def avatar_attachment(peer_id, uid):
-    """Картинка профиля: купленный персонаж. Нет персонажа — профиль без картинки (у всех одинаково)."""
+    """Картинка профиля: купленный персонаж (гифка — анимацией). Нет персонажа — профиль без картинки."""
     cur = get_user(uid).get("equip", {}).get("char")
+    if cur in GIF_ITEMS and cur in CHAR_FILES and os.path.exists(_find(CHAR_FILES[cur])):
+        return cached_doc(peer_id, _find(CHAR_FILES[cur]), f"avatar_{cur}_v{ART_SIG}", "Персонаж")
     if cur in CHAR_FILES and os.path.exists(char_path(cur)):
         return cached_photo(peer_id, char_path(cur), f"avatar_{cur}_v{ART_SIG}")
     return None
@@ -4568,7 +4597,7 @@ def shop_buy(peer_id, uid, item_id):
     user = get_user(uid)
     if owned(user, item_id):
         return f"Уже куплено: {name}"
-    if not secret_ready(item_id):
+    if not char_ready(item_id):
         return "Пока недоступно."
     price = item_price(item_id)
     if user["money"] < price:
@@ -4601,7 +4630,7 @@ def shop_wear(uid, item_id):
 
 def shop_items(uid, slot, mode):
     user = get_user(uid)
-    ids = [i for i, v in SHOP_ITEMS.items() if v[0] == slot and (owned(user, i) or secret_ready(i))]
+    ids = [i for i, v in SHOP_ITEMS.items() if v[0] == slot and (owned(user, i) or char_ready(i))]
     return [i for i in ids if owned(user, i)] if mode == "mine" else ids
 
 
