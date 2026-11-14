@@ -12,7 +12,8 @@ VK-бот для бесед.
 Владелец:       logs; права следящий (должность «Следящий за репортами»);
                 в ЛС боту: разбан (репорты), следящие
 Следящий за репортами (не модератор беседы): новый вопрос приходит всем свободным следящим и владельцу
-                с кнопками «Принять / Отказать»; кто принял — тот и отвечает, пока занят — новые не приходят
+                с кнопками «Принять / Отказать»; кто принял — тот и отвечает, пока занят — новые не приходят;
+                после разговора игрок оценивает следящего (5 кнопок-звёзд, 1–5)
 
 Данные хранятся в базе SQLite (файл bot.db); старые JSON-файлы переносятся автоматически.
 
@@ -1174,6 +1175,9 @@ def handle_callback(ev):
         return
     if cmd == "rs":                   # кнопки следящего за репортами в ЛС
         handle_staff_callback(ev, payload)
+        return
+    if cmd == "rate":                 # оценка следящего игроком (звёздочки в ЛС)
+        handle_rate_callback(ev, payload)
         return
     if ev["peer_id"] < CHAT_OFFSET and cmd != "shop":   # всё остальное работает только в беседах (магазин — и в ЛС)
         answer_event(ev, "Эта кнопка работает только в беседе.")
@@ -2706,6 +2710,7 @@ def staff_help_text():
             "✅ Закончить разговор — вопрос решён\n"
             "📤 Отправить владельцу — если не знаете, чем помочь (или идея достойна награды)\n"
             "🚫 Заблокировать пользователя — флуд и спам (владелец сможет разбанить)\n\n"
+            "⭐ После завершения разговора игрок оценивает вас от 1 до 5 — средняя оценка видна в «диалоги».\n\n"
             f"Команды: «диалоги», «помощь». Без ответа {REPORT_STAFF_WAIT // 60} мин. — разговор уйдёт владельцу.")
 
 
@@ -3209,6 +3214,9 @@ def staff_dialogs_text(uid):
             if rep.get("status") == "open" and rep.get("staff") == uid]
     waiting = sum(1 for rep in economy["reports"].values() if rep.get("status") == "queue")
     tail = f"\n\n⏳ Вопросов ждёт принятия: {waiting}" if waiting else ""
+    avg, n = staff_rating(uid)
+    if n:
+        tail += f"\n\n⭐ Ваша оценка: {avg:.1f} из 5 (отзывов: {n})"
     if not mine:
         return "📋 Открытых диалогов нет. Новые вопросы придут сюда сами." + tail
     names = get_names([rep["uid"] for _, rep in mine][:50])
@@ -3360,6 +3368,7 @@ def staff_action(ev, p):
         log_action(ev["peer_id"], uid, f"репорт #{rid}: разговор завершён")
         notify_report_user(ruid, "✅ Разговор завершён. Спасибо за обращение!\n"
                                  "Если понадобится помощь — нажмите «Репорт».", user_dm_keyboard())
+        ask_staff_rating(rid, rep)                # «Ваш отзыв следящему?» + 5 звёзд
         finish_card(rep, "✅ Разговор завершён")
         refill_offers()
         return None
@@ -3433,6 +3442,84 @@ def staff_action(ev, p):
     return "Неизвестная кнопка."
 
 
+# ----- оценка следящего игроком (после окончания разговора) -----
+RATE_ASK_TEXT = "⭐ Ваш отзыв следящему?\n\nОцените работу следящего от 1 до 5 — нажмите на звёздочки ниже."
+
+
+def rate_keyboard(rid):
+    """Одна строка: 5 кнопок «1⭐» … «5⭐»."""
+    kb = VkKeyboard(inline=True)
+    for score in range(1, 6):
+        kb.add_callback_button(f"{score}⭐", VkKeyboardColor.PRIMARY, {"cmd": "rate", "id": int(rid), "s": score})
+    return kb.get_keyboard()
+
+
+def staff_rating(uid):
+    """Средняя оценка следящего: (среднее, сколько оценок). Оценка хранится в репорте (rate_staff — кому она)."""
+    marks = [rep["rating"] for rep in economy["reports"].values()
+             if rep.get("rate_staff") == uid and rep.get("rating")]
+    return (sum(marks) / len(marks), len(marks)) if marks else (0.0, 0)
+
+
+def rating_text(uid):
+    avg, n = staff_rating(uid)
+    return f"⭐ {avg:.1f} ({n})" if n else "⭐ нет оценок"
+
+
+def ask_staff_rating(rid, rep):
+    """Игроку после разговора: «Ваш отзыв следящему?» и 5 кнопок-звёзд.
+    Не спрашиваем, если вёл разговор владелец, следящий ни разу не ответил или оценка уже стоит."""
+    staff = rep.get("staff")
+    if not staff or staff == OWNER_ID or not is_report_staff(staff) or rep.get("rating"):
+        return
+    if not any(e.get("w") == "s" for e in rep.get("log") or []):
+        return
+    rep["rate_staff"] = staff
+    try:
+        rep["rate_cmid"] = send_dm(rep["uid"], RATE_ASK_TEXT, rate_keyboard(rid))
+    except Exception as e:
+        print(f"Не удалось запросить оценку у игрока {rep['uid']}: {err_text(e)}")
+        rep.pop("rate_staff", None)
+        return
+    save_economy()
+
+
+def rate_action(ev, p):
+    try:
+        rid, score = str(int(p.get("id"))), int(p.get("s"))
+    except (TypeError, ValueError):
+        return "Кнопка устарела."
+    rep = economy["reports"].get(rid)
+    if not rep or not rep.get("rate_staff") or not 1 <= score <= 5:
+        return "Оценка недоступна."
+    if ev["user_id"] != rep["uid"]:
+        return "Оценить может только автор вопроса."
+    with DB_LOCK:
+        if rep.get("rating"):
+            return "Вы уже поставили оценку."
+        rep["rating"], rep["rated"] = score, int(time.time())
+        save_economy()
+    staff = rep["rate_staff"]
+    log_action(ev["peer_id"], ev["user_id"], f"репорт #{rid}: оценка следящему {staff}: {score}")
+    stars = "⭐" * score
+    try:
+        edit_message(ev["peer_id"], ev.get("conversation_message_id") or rep.get("rate_cmid"),
+                     f"✅ Спасибо за отзыв!\nВаша оценка следящему: {stars} ({score}/5)")
+    except Exception as e:
+        print(f"Не удалось обновить сообщение с оценкой: {err_text(e)}")
+    notify_report_user(staff, f"⭐ Игрок оценил ваш разговор по репорту #{rid}: {stars} ({score}/5)\n"
+                              f"Ваш рейтинг: {rating_text(staff)}")
+    return "Спасибо за оценку!"
+
+
+def handle_rate_callback(ev, p):
+    note = None
+    try:
+        note = rate_action(ev, p)
+    finally:
+        answer_event(ev, note)
+
+
 # ----- автоматика: зависшие разговоры -----
 def escalate_report(rid, reason, user_text):
     rep = economy["reports"][rid]
@@ -3474,6 +3561,7 @@ def check_report_dialogs():
             save_economy()
             notify_report_user(rep["uid"], "✅ Разговор завершён: давно не было сообщений.\n"
                                            "Если вопрос остался — нажмите «Репорт».", user_dm_keyboard())
+            ask_staff_rating(rid, rep)
             finish_card(rep, "⌛ Закрыт автоматически: нет сообщений")
             refill_offers()
 
@@ -3622,7 +3710,7 @@ def owner_staff_list(peer_id):
         if rep.get("status") == "open" and rep.get("staff"):
             busy[rep["staff"]] = r
     lines = [f"• [id{u}|{names.get(u, f'id{u}')}] (id{u}) — " +
-             (f"занят: репорт #{busy[u]}" if u in busy else "свободен") for u in ids]
+             (f"занят: репорт #{busy[u]}" if u in busy else "свободен") + f" · {rating_text(u)}" for u in ids]
     waiting = sum(1 for rep in economy["reports"].values() if rep.get("status") == "queue")
     tail = f"\n\n⏳ Вопросов ждёт принятия: {waiting}" if waiting else ""
     send(peer_id, f"👥 {REPORT_STAFF_TITLE} ({len(ids)}):\n" + "\n".join(lines) + tail +
