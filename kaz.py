@@ -11,7 +11,8 @@ VK-бот для бесед.
                 промокод, забрать деньги, забрать опыт — с разрешения владельца
 Владелец:       logs; права следящий (должность «Следящий за репортами»);
                 в ЛС боту: разбан (репорты), следящие
-Следящий за репортами (не модератор беседы): отвечает игрокам на репорты в ЛС бота
+Следящий за репортами (не модератор беседы): новый вопрос приходит всем свободным следящим и владельцу
+                с кнопками «Принять / Отказать»; кто принял — тот и отвечает, пока занят — новые не приходят
 
 Данные хранятся в базе SQLite (файл bot.db); старые JSON-файлы переносятся автоматически.
 
@@ -151,6 +152,7 @@ REPORT_REWARD_MONEY = 10_000_000
 REPORT_REWARD_EXP = 5
 REPORT_WINDOW = 3600            # сколько после «репорт» можно писать боту в ЛС
 REPORT_MAX_PER_WINDOW = 3
+REPORT_DAILY_REWARD = 5_000_000  # автонаграда за репорт: раз в сутки на игрока (0 — выключить)
 REPORT_STAFF_TITLE = "Следящий за репортами"   # название должности (команда: «права следящий»)
 REPORT_STAFF_WAIT = 1800        # следящий не ответил за это время (сек) — репорт уходит владельцу
 REPORT_IDLE_CLOSE = 86400       # в разговоре нет сообщений столько (сек) — он закрывается сам
@@ -279,11 +281,11 @@ COMMAND_CATEGORIES = [
         ("админы", "роли беседы и кто их занимает"),
     ]),
     ("🛍️ Магазин", [
-        ("магазин", "персонажи для профиля (лента товаров — листайте вправо)"),
+        ("магазин", "персонажи для профиля: бот пришлёт магазин в личные сообщения (лента товаров — листайте вправо)"),
         ("мои аксессуары", "надеть или снять купленного персонажа"),
     ]),
     ("📨 Обратная связь", [
-        ("репорт", f"жалобы на модераторов, баги бота и идеи: бот пришлёт ссылку, в ЛС нажмите кнопку «Репорт» (пауза — {REPORT_COOLDOWN} сек.)"),
+        ("репорт", f"жалобы на модераторов, баги бота и идеи: бот пришлёт ссылку, в ЛС нажмите кнопку «Репорт» (пауза — {REPORT_COOLDOWN} сек.). За репорт — {_n(REPORT_DAILY_REWARD)} 💰 раз в сутки"),
     ]),
 ]
 
@@ -331,6 +333,7 @@ vk_upload = VkUpload(vk_session)
 MENTION_RE = re.compile(r"\[id(\d+)\|[^\]]*\]")
 ID_RE = re.compile(r"(?:^|\s)(?:id)?(\d+)(?:\s|$)")
 BOT_MENTION_RE = re.compile(r"^\s*\[club\d+\|[^\]]*\]\s*,?\s*")
+ALL_IN_WORDS = ("все", "всё", "all", "вб", "ва-банк", "вабанк", "vb")   # «ставлю всё»
 AMOUNT_RE = re.compile(r"^(\d+(?:[.,]\d+)?)([кk]{0,4})$", re.IGNORECASE)
 TIME_UNITS = {"м": 60, "m": 60, "ч": 3600, "h": 3600, "д": 86400, "d": 86400}
 
@@ -1009,9 +1012,9 @@ def fmt_duration(seconds):
 
 
 def parse_amount(text, balance=None):
-    """1кк = 1 000 000, 500к = 500 000, 1.5кк, 2500; «все»/«всё» = весь баланс."""
+    """1кк = 1 000 000, 500к = 500 000, 1.5кк, 2500; «все»/«всё»/«вб» (ва-банк) = весь баланс."""
     t = text.strip().lower()
-    if balance is not None and t in ("все", "всё", "all"):
+    if balance is not None and t in ALL_IN_WORDS:
         return balance
     m = AMOUNT_RE.match(t)
     if not m:
@@ -1172,7 +1175,7 @@ def handle_callback(ev):
     if cmd == "rs":                   # кнопки следящего за репортами в ЛС
         handle_staff_callback(ev, payload)
         return
-    if ev["peer_id"] < CHAT_OFFSET:   # всё остальное работает только в беседах
+    if ev["peer_id"] < CHAT_OFFSET and cmd != "shop":   # всё остальное работает только в беседах (магазин — и в ЛС)
         answer_event(ev, "Эта кнопка работает только в беседе.")
         return
 
@@ -1540,7 +1543,7 @@ def mines_grid(game, reveal=False, hit=None):
 
 def mines_bet_page(uid):
     text = ("💣 Мины\n\nВыберите ставку (в процентах от баланса).\n"
-            "Или сразу напишите: мины 100к / мины 1кк / мины все")
+            "Или сразу напишите: мины 100к / мины 1кк / мины все (или мины вб)")
     kb = VkKeyboard(inline=True)
     for pct, label in ((10, "10%"), (25, "25%"), (50, "50%"), (100, "Всё")):
         kb.add_callback_button(label, VkKeyboardColor.SECONDARY,
@@ -1597,7 +1600,7 @@ def cmd_mines(msg, rest, slash):
         bet = parse_amount(rest.split()[0], balance)
         if bet is None:
             if slash:
-                send(peer_id, "ℹ️ Использование: мины СТАВКА (например: мины 100к, мины 1кк, мины все)")
+                send(peer_id, "ℹ️ Использование: мины СТАВКА (например: мины 100к, мины 1кк, мины все или мины вб)")
             return  # «мины на дороге» — обычная фраза
         err = check_bet(bet, balance)
         if err:
@@ -2616,6 +2619,7 @@ _REPORT_CLOSE_WORDS = ("снять", "убрать", "удалить", "0", "-")
 _dlg_times = {}          # игрок → время последних сообщений в разговоре (защита от флуда)
 _dlg_warned = {}         # игрок → когда ему последний раз писали «слишком часто»
 _rd_check = {"t": 0.0}   # когда последний раз проверяли зависшие разговоры
+_queue_noted = {}        # игрок → когда ему последний раз писали «дополнение сохранено»
 
 
 def is_report_staff(uid):
@@ -2635,13 +2639,24 @@ def staff_dm_keyboard():
     return kb.get_keyboard()
 
 
-def staff_keyboard(rid):
+def dialog_keyboard(rep, rid):
+    """Кнопки под карточкой разговора. У владельца вместо «Отправить владельцу» — «Решение (награда)»."""
     kb = VkKeyboard(inline=True)
     kb.add_callback_button("✅ Закончить разговор", VkKeyboardColor.POSITIVE, {"cmd": "rs", "a": "end", "id": int(rid)})
-    kb.add_callback_button("📤 Отправить владельцу", VkKeyboardColor.PRIMARY, {"cmd": "rs", "a": "own", "id": int(rid)})
+    if rep.get("staff") == OWNER_ID:
+        kb.add_callback_button("🏆 Решение (награда)", VkKeyboardColor.PRIMARY, {"cmd": "rs", "a": "own", "id": int(rid)})
+    else:
+        kb.add_callback_button("📤 Отправить владельцу", VkKeyboardColor.PRIMARY, {"cmd": "rs", "a": "own", "id": int(rid)})
     kb.add_line()
     kb.add_callback_button("🚫 Заблокировать пользователя", VkKeyboardColor.NEGATIVE,
                            {"cmd": "rs", "a": "ban", "id": int(rid)})
+    return kb.get_keyboard()
+
+
+def offer_keyboard(rid):
+    kb = VkKeyboard(inline=True)
+    kb.add_callback_button("✅ Принять", VkKeyboardColor.POSITIVE, {"cmd": "rs", "a": "take", "id": int(rid)})
+    kb.add_callback_button("❌ Отказать", VkKeyboardColor.NEGATIVE, {"cmd": "rs", "a": "skip", "id": int(rid)})
     return kb.get_keyboard()
 
 
@@ -2657,24 +2672,41 @@ def owner_report_keyboard(rid):
     return kb.get_keyboard()
 
 
+def grant_daily_report_reward(uid):
+    """+5кк за репорт, но не чаще раза в сутки (до полуночи по времени бота). Возвращает строку для игрока."""
+    if REPORT_DAILY_REWARD <= 0:
+        return ""
+    user = get_user(uid)
+    if user.get("report_day") == today_str():
+        return "\n💰 Награда за репорт сегодня уже получена — следующая завтра."
+    user["report_day"] = today_str()
+    user["money"] += REPORT_DAILY_REWARD
+    save_economy()
+    log_action(uid, uid, f"репорт: автонаграда {REPORT_DAILY_REWARD}")
+    return f"\n💰 +{fmt_num(REPORT_DAILY_REWARD)} за репорт (раз в сутки). Баланс: {fmt_num(user['money'])}"
+
+
 def report_info_text():
     return ("📨 Репорт\n\n"
             "Если у вас есть жалобы на модераторов, баги бота или идеи для бота — обратитесь командой "
             "«репорт» в беседе или нажмите кнопку «Репорт» («для пользователей») ниже.\n\n"
             "Опишите проблему одним сообщением — вам ответит следящий за репортами.\n"
-            "Если владельцу понравится ваша идея, он выдаст награду — деньги и/или опыт.\n\n"
+            f"За репорт — {fmt_num(REPORT_DAILY_REWARD)} 💰 (раз в сутки). "
+            "А если владельцу понравится идея, он выдаст ещё больше.\n\n"
             "⚠ Бесполезный флуд — блокировка репортов.")
 
 
 def staff_help_text():
     return (f"🛡 {REPORT_STAFF_TITLE}\n\n"
-            "Сюда приходят репорты игроков. Ответьте (reply) на сообщение с репортом — ваш ответ уйдёт автору.\n\n"
-            "Кнопки под репортом:\n"
+            "Когда игрок задаёт вопрос, всем свободным следящим и владельцу приходит «🆕 Новый вопрос» "
+            "с кнопками «Принять» и «Отказать». Кто первым нажал «Принять» — тот и отвечает, у остальных вопрос гаснет.\n"
+            "Пока вы ведёте разговор, новые вопросы вам не приходят: их получают свободные коллеги, "
+            "а вам придут, когда вы закончите.\n\n"
+            "В разговоре отвечайте через reply на сообщение игрока — ответ уйдёт ему. Кнопки под сообщением:\n"
             "✅ Закончить разговор — вопрос решён\n"
             "📤 Отправить владельцу — если не знаете, чем помочь (или идея достойна награды)\n"
             "🚫 Заблокировать пользователя — флуд и спам (владелец сможет разбанить)\n\n"
-            "Если открыто несколько диалогов — отвечайте через reply или пишите «#номер текст».\n"
-            f"Команды: «диалоги», «помощь». Без ответа {REPORT_STAFF_WAIT // 60} мин. — репорт уйдёт владельцу.")
+            f"Команды: «диалоги», «помощь». Без ответа {REPORT_STAFF_WAIT // 60} мин. — разговор уйдёт владельцу.")
 
 
 def dm_payload(msg):
@@ -2751,7 +2783,8 @@ def cmd_report(msg, rest, slash):
          "перейдите по ссылке и нажмите кнопку «Репорт» («для пользователей»):\n"
          f"https://vk.me/club{GROUP_ID}\n\n"
          "Затем опишите проблему одним сообщением — вам ответит следящий за репортами.\n"
-         "Если владельцу понравится ваша идея, он выдаст вам награду — деньги и/или опыт.\n\n"
+         f"За репорт — {fmt_num(REPORT_DAILY_REWARD)} 💰 (раз в сутки). "
+         "Если владельцу понравится идея, он выдаст ещё больше.\n\n"
          "⚠ Бесполезный флуд — кик/бан.\n"
          f"Написать боту можно в течение {REPORT_WINDOW // 60} мин. "
          f"Между репортами пауза {REPORT_COOLDOWN} сек.")
@@ -2803,9 +2836,12 @@ def forward_to_owner(rid, by=None, reason=None):
     rep = economy["reports"][rid]
     names = get_names([rep["uid"]] + ([by] if by else []))
     send_owner_card(rid, rep, names, by, reason)
+    if rep.get("status") == "queue":
+        close_offers(rep, f"📨 Вопрос #{rid}\n⏰ Никто не принял — передан владельцу")
     rep["status"] = "new"          # дальше — как раньше: награда / отказ / блок
     rep["fwd"] = {"by": by or 0, "reason": reason or ""}
     rep.pop("wait", None)
+    rep.pop("queued", None)
     save_economy()
 
 
@@ -2817,42 +2853,50 @@ def staff_card_text(rid, rep, names):
 STAFF_REPLY_HINT = "\n\n↩ Ответьте (reply) на это сообщение — ответ уйдёт автору."
 
 
-def send_staff_card(rid, rep, staff, names):
-    """Новый разговор: карточка репорта следящему с кнопками. Бросает ошибку, если ему не написать."""
-    if "log" not in rep:
-        rep["log"] = [{"w": "u", "t": rep["t"], "x": rep["text"]}]
-    text = staff_card_text(rid, rep, names)
-    cmid = send_dm(staff, text + STAFF_REPLY_HINT, staff_keyboard(rid))
-    now = time.time()
-    rep.update(status="open", staff=staff, opened=int(now), last=now, wait=now,
-               card={"cmid": cmid, "text": text}, ids=[cmid] if cmid else [])
+def staff_busy(uid):
+    """Следящий ведёт разговор — новые вопросы ему не приходят, пока не закончит."""
+    return any(rep.get("status") == "open" and rep.get("staff") == uid for rep in economy["reports"].values())
 
 
-def pick_staff(exclude=()):
-    """Следящие по возрастанию загрузки (открытых диалогов)."""
-    load = {}
-    for rep in economy["reports"].values():
-        if rep.get("status") == "open" and rep.get("staff"):
-            load[rep["staff"]] = load.get(rep["staff"], 0) + 1
-    cands = [int(u) for u in economy["report_staff"] if int(u) not in exclude]
-    random.shuffle(cands)
-    cands.sort(key=lambda u: load.get(u, 0))
-    return cands
+def _unreachable(e):
+    """VK: нельзя писать пользователю (нет разрешения / чёрный список) — повторять бессмысленно."""
+    text = str(e)
+    return any(code in text for code in ("900", "901", "902"))
 
 
-def dispatch_report(rid, exclude=()):
-    """Отдаёт репорт следящему, а если некому (или не доставить) — владельцу.
-    Возвращает 'staff', 'owner' или None."""
-    rep = economy["reports"][rid]
-    names = get_names([rep["uid"]])
-    for staff in pick_staff(set(exclude) | {rep["uid"]}):
-        try:
-            send_staff_card(rid, rep, staff, names)
-            economy["report_mode"].pop(str(rep["uid"]), None)    # дальше пишем в разговор, а не новым репортом
-            save_economy()
-            return "staff"
-        except Exception as e:
-            print(f"Не удалось отправить репорт следящему {staff}: {err_text(e)}")
+def offer_text(rid, rep, names):
+    uid = rep["uid"]
+    return (f"🆕 Новый вопрос #{rid}\nОт: [id{uid}|{names.get(uid, f'id{uid}')}] (id{uid})\n\n{report_body(rep)}"
+            "\n\nКто первым нажмёт «Принять» — тот и отвечает.")
+
+
+def offer_to(rid, rep, uid, names):
+    """Уведомление «Новый вопрос» с кнопками «Принять / Отказать». True — доставлено."""
+    try:
+        cmid = send_dm(uid, offer_text(rid, rep, names), offer_keyboard(rid))
+    except Exception as e:
+        print(f"Не удалось предложить вопрос #{rid} пользователю {uid}: {err_text(e)}")
+        if uid != OWNER_ID and _unreachable(e):          # ему не написать — считаем отказом
+            rep.setdefault("declined", []).append(uid)
+        return False
+    rep.setdefault("offers", {})[str(uid)] = {"cmid": cmid}
+    return True
+
+
+def close_offers(rep, text, keep=None):
+    """Убирает кнопки у всех висящих уведомлений (кроме keep) и пишет в них итог."""
+    for u, info in (rep.pop("offers", None) or {}).items():
+        if keep is not None and int(u) == keep:
+            continue
+        if info.get("cmid"):
+            try:
+                edit_message(int(u), info["cmid"], text)
+            except Exception as e:
+                print(f"Не удалось обновить уведомление у {u}: {err_text(e)}")
+
+
+def direct_to_owner(rid, rep, names):
+    """Следящих нет — репорт сразу владельцу с кнопками решения, как раньше."""
     try:
         rep["status"] = "new"
         send_owner_card(rid, rep, names)
@@ -2861,6 +2905,118 @@ def dispatch_report(rid, exclude=()):
     except Exception as e:
         print(f"Не удалось отправить репорт владельцу: {err_text(e)}")
         return None
+
+
+def dispatch_report(rid):
+    """Новый вопрос: всем СВОБОДНЫМ следящим и владельцу — «Принять / Отказать».
+    Занятые следящие получат вопрос, когда освободятся. Возвращает 'queue', 'owner' или None."""
+    rep = economy["reports"][rid]
+    names = get_names([rep["uid"]])
+    staff_ids = [int(u) for u in economy["report_staff"] if int(u) != rep["uid"]]
+    if not staff_ids:
+        return direct_to_owner(rid, rep, names)
+    if "log" not in rep:
+        rep["log"] = [{"w": "u", "t": rep["t"], "x": rep["text"]}]
+    for key in ("staff", "card", "ids", "wait", "opened"):
+        rep.pop(key, None)
+    rep.update(status="queue", queued=int(time.time()), offers={}, declined=[])
+    economy["report_mode"].pop(str(rep["uid"]), None)   # дальше пишем в разговор, а не новым репортом
+    delivered = 0
+    for u in staff_ids:
+        if not staff_busy(u) and offer_to(rid, rep, u, names):
+            delivered += 1
+    if rep["uid"] != OWNER_ID and offer_to(rid, rep, OWNER_ID, names):
+        delivered += 1
+    if not delivered and not any(staff_busy(u) for u in staff_ids):
+        rep["offers"], rep["declined"] = {}, []
+        return direct_to_owner(rid, rep, names)          # некому предложить — сразу владельцу
+    save_economy()
+    return "queue"
+
+
+def refill_offers():
+    """Следящий освободился (или добавлен) и ни одного вопроса ему не висит — предлагаем самый старый из очереди."""
+    queued = sorted(((int(r), r, rep) for r, rep in economy["reports"].items() if rep.get("status") == "queue"),
+                    key=lambda x: x[0])
+    if not queued:
+        return
+    for u in [int(x) for x in economy["report_staff"]]:
+        if staff_busy(u) or any(str(u) in rep.get("offers", {}) for _, _, rep in queued):
+            continue
+        for _, rid, rep in queued:
+            if u == rep["uid"] or u in rep.get("declined", []) or str(u) in rep.get("offers", {}):
+                continue
+            if offer_to(rid, rep, u, get_names([rep["uid"]])):
+                save_economy()
+                break
+
+
+def maybe_reject_all(rid):
+    """Все следящие и владелец отказались — репорт закрывается, игрок получает «рассмотрен»."""
+    rep = economy["reports"][rid]
+    if rep.get("status") != "queue":
+        return False
+    eligible = {int(u) for u in economy["report_staff"]} | {OWNER_ID}
+    eligible.discard(rep["uid"])
+    if not eligible <= set(rep.get("declined", [])):
+        return False
+    rep["status"] = "rejected"
+    rep.pop("queued", None)
+    save_economy()
+    notify_report_user(rep["uid"], f"Ваш репорт #{rid} рассмотрен. Спасибо за обращение!", user_dm_keyboard())
+    return True
+
+
+def claim_report(rid, rep, uid, cmid):
+    """Первый нажавший «Принять» ведёт разговор: его уведомление становится карточкой диалога,
+    у остальных уведомления гаснут. True — принято."""
+    offers = rep.pop("offers", None) or {}
+    offers.pop(str(uid), None)
+    now = time.time()
+    rep.update(status="open", staff=uid, opened=int(now), last=now, wait=now)
+    rep.pop("queued", None)
+    names = get_names([rep["uid"], uid])
+    text = staff_card_text(rid, rep, names)
+    kb = dialog_keyboard(rep, rid)
+    new_cmid = None
+    if cmid:
+        try:
+            edit_message(uid, cmid, text + STAFF_REPLY_HINT, kb)
+            new_cmid = cmid
+        except Exception as e:
+            print(f"Не удалось превратить уведомление в карточку: {err_text(e)}")
+    if not new_cmid:
+        try:
+            new_cmid = send_dm(uid, text + STAFF_REPLY_HINT, kb)
+        except Exception as e:
+            print(f"Не удалось отправить карточку разговора {uid}: {err_text(e)}")
+            rep["status"], rep["offers"] = "queue", offers      # не вышло — вопрос остаётся в очереди
+            for key in ("staff", "opened", "last", "wait"):
+                rep.pop(key, None)
+            rep["queued"] = int(now)
+            return False
+    rep["card"] = {"cmid": new_cmid, "text": text}
+    rep["ids"] = [new_cmid] if new_cmid else []
+    photos = rep.pop("photos", None)
+    save_economy()
+    log_action(uid, uid, f"репорт #{rid}: принят")
+
+    who = "владелец" if uid == OWNER_ID else names.get(uid, f"id{uid}")
+    for u, info in offers.items():
+        if info.get("cmid"):
+            try:
+                edit_message(int(u), info["cmid"], f"📨 Вопрос #{rid}\n✅ Принял: {who}")
+            except Exception as e:
+                print(f"Не удалось обновить уведомление у {u}: {err_text(e)}")
+    if photos:                                   # фото, которые игрок прислал, пока вопрос ждал
+        try:
+            send_dm(uid, f"📎 Фото к вопросу #{rid}", attachment=",".join(photos[-10:]))
+        except Exception as e:
+            print(f"Не удалось переслать фото к вопросу #{rid}: {err_text(e)}")
+    kind = "владелец" if uid == OWNER_ID else REPORT_STAFF_TITLE.lower()
+    notify_report_user(rep["uid"], f"✅ Ваш вопрос принял {kind}. Пишите сюда — вам ответят.", user_dm_keyboard())
+    refill_offers()                              # кто остался без вопроса, получит следующий
+    return True
 
 
 def strip_card_keyboard(rep):
@@ -2884,9 +3040,10 @@ def finish_card(rep, status_line):
         print(f"Не удалось обновить карточку репорта: {err_text(e)}")
 
 
-def open_dialog_of(uid):
+def active_dialog_of(uid):
+    """Незавершённое обращение игрока: ждёт следящего (queue) или идёт разговор (open)."""
     for rid, rep in economy["reports"].items():
-        if rep.get("uid") == uid and rep.get("status") == "open":
+        if rep.get("uid") == uid and rep.get("status") in ("open", "queue"):
             return rid
     return None
 
@@ -2901,6 +3058,31 @@ def dialog_flood(uid):
 
 
 # ----- игрок пишет боту в ЛС -----
+def queue_user_message(rid, msg, text, photos):
+    """Игрок дописал сообщение, пока вопрос ждёт следящего: сохраняем, следящий увидит при принятии."""
+    rep = economy["reports"][rid]
+    uid, peer_id = rep["uid"], msg["peer_id"]
+    if dialog_flood(uid):
+        if time.time() - _dlg_warned.get(uid, 0) > 10:
+            _dlg_warned[uid] = time.time()
+            send(peer_id, "⏳ Слишком часто. Подождите немного и напишите ещё раз.")
+        return
+    if not text and not photos:
+        send(peer_id, "⚠ Отправьте сообщение текстом или фото.")
+        return
+    shown = text[:1000] if text else "[фото]"
+    if text and photos:
+        shown += " [+фото]"
+    log_report(rep, "u", shown)
+    if photos:
+        rep["photos"] = (rep.get("photos", []) + photos.split(","))[-10:]
+    rep["last"] = time.time()
+    save_economy()
+    if time.time() - _queue_noted.get(uid, 0) > 60:
+        _queue_noted[uid] = time.time()
+        send(peer_id, "⏳ Дополнение сохранено — следящий увидит его, как только возьмёт ваш вопрос.")
+
+
 def relay_user_message(rid, msg, text, photos):
     """Сообщение игрока внутри открытого разговора уходит следящему."""
     rep = economy["reports"][rid]
@@ -2928,13 +3110,16 @@ def relay_user_message(rid, msg, text, photos):
     strip_card_keyboard(rep)
     try:
         try:
-            cmid = send_dm(staff, body, staff_keyboard(rid), photos)
+            cmid = send_dm(staff, body, dialog_keyboard(rep, rid), photos)
         except Exception:
             if not photos:
                 raise
-            cmid = send_dm(staff, body + "\n(фото переслать не удалось)", staff_keyboard(rid))
+            cmid = send_dm(staff, body + "\n(фото переслать не удалось)", dialog_keyboard(rep, rid))
     except Exception as e:           # следящему не написать — репорт уходит владельцу
         print(f"Не удалось передать сообщение следящему {staff}: {err_text(e)}")
+        if staff == OWNER_ID:
+            send(peer_id, "❌ Не удалось доставить сообщение. Попробуйте чуть позже.")
+            return
         try:
             forward_to_owner(rid, reason="⚠ Следящему не удалось доставить сообщение")
             notify_report_user(uid, "📤 Ваш репорт передан владельцу — он рассмотрит его.", user_dm_keyboard())
@@ -2963,12 +3148,14 @@ def user_dm(msg, text):
         send(peer_id, "⛔ Вам недоступна отправка репортов.")
         return
 
-    rid = open_dialog_of(uid)
-    if rid:                                   # идёт разговор со следящим
+    rid = active_dialog_of(uid)
+    if rid:                                   # обращение уже идёт: ждёт следящего или разговор
         if wants_report or wants_start:
             send(peer_id, "💬 Ваше обращение уже в работе — просто пишите сюда, следящий увидит.", user_dm_keyboard())
-            return
-        relay_user_message(rid, msg, text, photos)
+        elif economy["reports"][rid]["status"] == "open":
+            relay_user_message(rid, msg, text, photos)
+        else:
+            queue_user_message(rid, msg, text, photos)
         return
 
     if wants_report:
@@ -3002,11 +3189,12 @@ def user_dm(msg, text):
     save_economy()
 
     where = dispatch_report(rid)
-    if where == "staff":
-        send(peer_id, "✅ Репорт принят. С вами свяжется следящий за репортами — ответ придёт сюда. "
-                      "Можно дописывать сообщения.", user_dm_keyboard())
+    bonus = grant_daily_report_reward(uid) if where else ""
+    if where == "queue":
+        send(peer_id, "✅ Вопрос принят. Первый свободный следящий возьмёт его и ответит вам здесь. "
+                      "Можно дописывать сообщения." + bonus, user_dm_keyboard())
     elif where == "owner":
-        send(peer_id, "✅ Репорт отправлен владельцу. Если идея понравится — вы получите награду. Спасибо!",
+        send(peer_id, "✅ Репорт отправлен владельцу. Если идея понравится — вы получите награду. Спасибо!" + bonus,
              user_dm_keyboard())
     else:
         economy["reports"][rid]["status"] = "undelivered"
@@ -3019,8 +3207,10 @@ def user_dm(msg, text):
 def staff_dialogs_text(uid):
     mine = [(r, rep) for r, rep in economy["reports"].items()
             if rep.get("status") == "open" and rep.get("staff") == uid]
+    waiting = sum(1 for rep in economy["reports"].values() if rep.get("status") == "queue")
+    tail = f"\n\n⏳ Вопросов ждёт принятия: {waiting}" if waiting else ""
     if not mine:
-        return "📋 Открытых диалогов нет. Новые репорты придут сюда сами."
+        return "📋 Открытых диалогов нет. Новые вопросы придут сюда сами." + tail
     names = get_names([rep["uid"] for _, rep in mine][:50])
     now = time.time()
     lines = []
@@ -3029,7 +3219,7 @@ def staff_dialogs_text(uid):
         wait = rep.get("wait")
         state = f"ждёт ответа {fmt_duration(now - wait)}" if wait else "ответ дан"
         lines.append(f"• #{r} — {who}: {state}")
-    return "📋 Ваши диалоги:\n" + "\n".join(lines) + "\n\nОтвет: reply на сообщение или «#номер текст»."
+    return ("📋 Ваши диалоги:\n" + "\n".join(lines) + "\n\nОтвет: reply на сообщение или «#номер текст»." + tail)
 
 
 def staff_dm(msg, text):
@@ -3109,19 +3299,57 @@ def handle_staff_callback(ev, p):
         answer_event(ev, note)
 
 
+def take_or_skip(ev, rid, rep, uid, act):
+    """«Принять» / «Отказать» под уведомлением «Новый вопрос». Кто успел принять — тот и отвечает."""
+    status = rep.get("status")
+    if status != "queue":
+        if status == "open":
+            staff = rep.get("staff")
+            who = "владелец" if staff == OWNER_ID else get_names([staff]).get(staff, "другой следящий")
+            return f"Вопрос уже принял: {who}"
+        return "Вопрос уже обработан."
+    if uid == rep["uid"]:
+        return "Это ваш собственный вопрос."
+
+    if act == "skip":
+        answer_event(ev, "Вы отказались от вопроса")
+        (rep.get("offers") or {}).pop(str(uid), None)
+        if uid not in rep.setdefault("declined", []):
+            rep["declined"].append(uid)
+        save_economy()
+        try:
+            edit_message(uid, ev["conversation_message_id"], f"📨 Вопрос #{rid}\n❌ Вы отказались")
+        except Exception as e:
+            print(f"Не удалось обновить уведомление: {err_text(e)}")
+        maybe_reject_all(rid)
+        refill_offers()
+        return None
+
+    if uid != OWNER_ID and staff_busy(uid):
+        return "Сначала закончите текущий разговор."
+    answer_event(ev, "Вы приняли вопрос")
+    if not claim_report(rid, rep, uid, ev.get("conversation_message_id")):
+        send(uid, f"❌ Не удалось открыть разговор по вопросу #{rid}. Попробуйте принять ещё раз.")
+    return None
+
+
 def staff_action(ev, p):
     uid = ev["user_id"]
     rid = str(p.get("id"))
     rep = economy["reports"].get(rid)
     if not rep:
         return "Репорт не найден."
+    act = p.get("a")
+    if not (is_report_staff(uid) or uid == OWNER_ID):
+        return "Это действие доступно только следящим."
+    if act in ("take", "skip"):
+        return take_or_skip(ev, rid, rep, uid, act)
     if rep.get("status") != "open":
         return "Этот разговор уже завершён."
-    if not is_report_staff(uid) or rep.get("staff") != uid:
+    if rep.get("staff") != uid:
         return "Этот разговор ведёт другой следящий."
 
     ruid = rep["uid"]
-    act = p.get("a")
     card = rep.get("card") or {}
 
     if act == "end":
@@ -3133,20 +3361,29 @@ def staff_action(ev, p):
         notify_report_user(ruid, "✅ Разговор завершён. Спасибо за обращение!\n"
                                  "Если понадобится помощь — нажмите «Репорт».", user_dm_keyboard())
         finish_card(rep, "✅ Разговор завершён")
+        refill_offers()
         return None
 
     if act == "own":
-        answer_event(ev, "Отправляю владельцу…")
+        answer_event(ev, "Отправляю владельцу…" if uid != OWNER_ID else "Открываю решение…")
         try:
-            forward_to_owner(rid, by=uid)
+            if uid == OWNER_ID:
+                forward_to_owner(rid, reason="🏆 Вы приняли этот вопрос — решение по награде ниже")
+            else:
+                forward_to_owner(rid, by=uid)
         except Exception as e:
             print(f"Не удалось отправить репорт владельцу: {err_text(e)}")
             send(ev["peer_id"], f"❌ Не удалось отправить репорт #{rid} владельцу. Попробуйте ещё раз.")
             return None
         log_action(ev["peer_id"], uid, f"репорт #{rid}: отправлен владельцу")
-        notify_report_user(ruid, "📤 Ваш репорт передан владельцу — он рассмотрит его, решение придёт сюда.",
-                           user_dm_keyboard())
-        finish_card(rep, "📤 Отправлено владельцу")
+        if uid == OWNER_ID:
+            notify_report_user(ruid, "⏳ Владелец рассматривает ваш репорт — решение придёт сюда.", user_dm_keyboard())
+            finish_card(rep, "🏆 Передано на решение (награда / отказ)")
+        else:
+            notify_report_user(ruid, "📤 Ваш репорт передан владельцу — он рассмотрит его, решение придёт сюда.",
+                               user_dm_keyboard())
+            finish_card(rep, "📤 Отправлено владельцу")
+        refill_offers()
         return None
 
     if act == "ban":                          # сначала подтверждение
@@ -3167,7 +3404,7 @@ def staff_action(ev, p):
         answer_event(ev, "Отменено")
         if card.get("cmid"):
             try:
-                edit_message(rep["staff"], card["cmid"], card["text"], staff_keyboard(rid))
+                edit_message(rep["staff"], card["cmid"], card["text"], dialog_keyboard(rep, rid))
             except Exception as e:
                 print(f"Не удалось вернуть кнопки: {err_text(e)}")
         return None
@@ -3181,6 +3418,9 @@ def staff_action(ev, p):
         log_action(ev["peer_id"], uid, f"репорт #{rid}: заблокирован {ruid}")
         notify_report_user(ruid, "⛔ Отправка репортов вам недоступна.")
         finish_card(rep, "🚫 Пользователь заблокирован в репортах")
+        refill_offers()
+        if uid == OWNER_ID:
+            return None
         names = get_names([uid, ruid])
         try:
             send(OWNER_ID, f"🚫 {REPORT_STAFF_TITLE} [id{uid}|{names.get(uid, f'id{uid}')}] заблокировал "
@@ -3204,40 +3444,64 @@ def escalate_report(rid, reason, user_text):
         return
     notify_report_user(rep["uid"], user_text, user_dm_keyboard())
     finish_card(rep, "⏰ Передано владельцу: нет ответа")
+    refill_offers()
 
 
 def check_report_dialogs():
-    """Раз в 30 сек: без ответа следящего слишком долго — репорт уходит владельцу; тихий разговор закрывается."""
+    """Раз в 30 сек: раздаём вопросы освободившимся; вопрос без желающих или разговор без ответа
+    слишком долго уходит владельцу; тихий разговор закрывается сам."""
     now = time.time()
     if now - _rd_check["t"] < 30:
         return
     _rd_check["t"] = now
+    refill_offers()
     for rid, rep in list(economy["reports"].items()):
-        if rep.get("status") != "open":
+        status = rep.get("status")
+        if status == "queue":
+            if now - rep.get("queued", rep["t"]) > REPORT_STAFF_WAIT:
+                escalate_report(rid, "⏰ Никто из следящих не принял вопрос",
+                                "⏳ Все следящие заняты — ваш вопрос передан владельцу, он рассмотрит его.")
+            continue
+        if status != "open":
             continue
         wait = rep.get("wait")
-        if wait and now - wait > REPORT_STAFF_WAIT:
+        owner_dialog = rep.get("staff") == OWNER_ID
+        if wait and not owner_dialog and now - wait > REPORT_STAFF_WAIT:
             escalate_report(rid, "⏰ Следящий не ответил вовремя",
                             "⏳ Следящий пока не смог ответить — репорт передан владельцу, он рассмотрит его.")
-        elif not wait and now - rep.get("last", rep["t"]) > REPORT_IDLE_CLOSE:
+        elif (not wait or owner_dialog) and now - rep.get("last", rep["t"]) > REPORT_IDLE_CLOSE:
             rep["status"], rep["closed_by"] = "closed", 0
             save_economy()
             notify_report_user(rep["uid"], "✅ Разговор завершён: давно не было сообщений.\n"
                                            "Если вопрос остался — нажмите «Репорт».", user_dm_keyboard())
             finish_card(rep, "⌛ Закрыт автоматически: нет сообщений")
+            refill_offers()
 
 
 def reassign_dialogs(old_staff):
-    """У следящего сняли должность: его открытые диалоги переходят другому следящему или владельцу."""
+    """У следящего сняли должность: его уведомления гаснут, открытые диалоги возвращаются в очередь
+    (другим следящим и владельцу) или уходят владельцу, если следящих больше нет."""
     moved = 0
     for rid, rep in list(economy["reports"].items()):
-        if rep.get("status") == "open" and rep.get("staff") == old_staff:
+        if rep.get("status") == "queue":
+            info = (rep.get("offers") or {}).pop(str(old_staff), None)
+            if info and info.get("cmid"):
+                try:
+                    edit_message(old_staff, info["cmid"], f"📨 Вопрос #{rid}\n↩ Вопрос вам больше недоступен")
+                except Exception as e:
+                    print(f"Не удалось обновить уведомление: {err_text(e)}")
+            maybe_reject_all(rid)
+        elif rep.get("status") == "open" and rep.get("staff") == old_staff:
             finish_card(rep, "↪ Диалог передан другому")
-            where = dispatch_report(rid, exclude={old_staff})
+            where = dispatch_report(rid)
             if where == "owner":
                 notify_report_user(rep["uid"], "📤 Ваш репорт передан владельцу — он рассмотрит его.",
                                    user_dm_keyboard())
+            elif where == "queue":
+                notify_report_user(rep["uid"], "⏳ Ваш вопрос передан другому следящему — ждите ответа.",
+                                   user_dm_keyboard())
             moved += 1
+    refill_offers()
     return moved
 
 
@@ -3290,6 +3554,7 @@ def set_report_staff(target, on, actor, peer_id):
             print(f"Не удалось написать новому следящему {target}: {err_text(e)}")
             res += ("\n⚠ Не удалось написать ему в ЛС. Пусть откроет диалог с ботом и отправит любое сообщение: "
                     f"https://vk.me/club{GROUP_ID}")
+        refill_offers()                           # неразобранные вопросы — новому следящему
         return res
     if str(target) not in staff:
         return f"ℹ️ У {who} нет должности «{REPORT_STAFF_TITLE}»."
@@ -3352,12 +3617,15 @@ def owner_staff_list(peer_id):
         send(peer_id, f"👥 {REPORT_STAFF_TITLE}: пока никого.\nНазначить: права следящий ID")
         return
     names = get_names(ids)
-    load = {}
-    for rep in economy["reports"].values():
+    busy = {}
+    for r, rep in economy["reports"].items():
         if rep.get("status") == "open" and rep.get("staff"):
-            load[rep["staff"]] = load.get(rep["staff"], 0) + 1
-    lines = [f"• [id{u}|{names.get(u, f'id{u}')}] (id{u}) — открыто диалогов: {load.get(u, 0)}" for u in ids]
-    send(peer_id, f"👥 {REPORT_STAFF_TITLE} ({len(ids)}):\n" + "\n".join(lines) +
+            busy[rep["staff"]] = r
+    lines = [f"• [id{u}|{names.get(u, f'id{u}')}] (id{u}) — " +
+             (f"занят: репорт #{busy[u]}" if u in busy else "свободен") for u in ids]
+    waiting = sum(1 for rep in economy["reports"].values() if rep.get("status") == "queue")
+    tail = f"\n\n⏳ Вопросов ждёт принятия: {waiting}" if waiting else ""
+    send(peer_id, f"👥 {REPORT_STAFF_TITLE} ({len(ids)}):\n" + "\n".join(lines) + tail +
          "\n\nНазначить: права следящий ID\nСнять: права следящий снять ID")
 
 
@@ -3382,6 +3650,13 @@ def owner_report_command(msg, text):
     return False
 
 
+OWNER_DM_WORDS = ("файл", "file", "бэкап", "backup", "восстановить", "restore")
+
+
+def owner_open_dialogs():
+    return any(rep.get("status") == "open" and rep.get("staff") == OWNER_ID for rep in economy["reports"].values())
+
+
 def handle_dm(msg):
     """Личные сообщения боту: репорты (игроки ↔ следящие ↔ владелец)."""
     uid = msg["from_id"]
@@ -3389,12 +3664,27 @@ def handle_dm(msg):
         return
     peer_id = msg["peer_id"]
     text = (msg.get("text") or "").strip()
+    if (text.lower().strip(" .!?") in ("магазин", "shop") and not active_dialog_of(uid)
+            and not any(r.get("status") == "open" and r.get("staff") == uid for r in economy["reports"].values())
+            and not (uid == OWNER_ID and economy.get("report_wait"))):
+        left = freeze_left(uid) if uid != OWNER_ID else 0
+        if left > 0:
+            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}.")
+        else:
+            menu_text, menu_kb = shop_menu_page(uid, "shop")
+            send(peer_id, menu_text, menu_kb)
+        return
     if uid == OWNER_ID:
         if owner_report_command(msg, text):
             return
         wait = economy.get("report_wait")
         if text and wait and wait.get("mode") == "reply" and owner_reward_input(msg, text):
             return                                  # ответ игроку (текст «восстановили баг» — не команда)
+        has_doc = any(a.get("type") == "doc" for a in msg.get("attachments") or [])
+        if ((text or msg_photos(msg)) and not economy.get("report_wait") and owner_open_dialogs() and not has_doc
+                and text.lower().strip(" .!?") not in OWNER_DM_WORDS):
+            staff_dm(msg, text)                     # владелец принял вопрос — переписывается как следящий
+            return
         if owner_dm_command(msg, text):
             return
         if text and economy.get("report_wait") and owner_reward_input(msg, text):
@@ -3980,6 +4270,7 @@ def roulette_usage():
     return ("🎰 Рулетка\n\n"
             "Ставка: рулетка чет 1кк / рулетка нечет 500к\n"
             "Или: рулетка красный 1кк / рулетка черный все\n"
+            "Ва-банк: рулетка вб / рулетка чет вб\n"
             f"Выигрыш x{ROULETTE_PAYOUT} (VIP — x{ROULETTE_PAYOUT * VIP_WIN_BONUS:g}).\n"
             "Выпал 0 — ставка проиграна.\n\n"
             "Можно проще: рулетка СУММА — и выбрать вариант кнопкой.")
@@ -5583,8 +5874,20 @@ def shop_action(ev, p):
 
 
 def cmd_shop(msg, rest, slash):
-    text, kb = shop_menu_page(msg["from_id"], "shop")
-    send(msg["peer_id"], text, kb)
+    """Магазин присылается в личные сообщения — в беседе ленты товаров только мешают."""
+    peer_id, uid = msg["peer_id"], msg["from_id"]
+    text, kb = shop_menu_page(uid, "shop")
+    if peer_id < CHAT_OFFSET:                  # написали прямо в ЛС боту
+        send(peer_id, text, kb)
+        return
+    try:
+        send(uid, text, kb)
+    except Exception as e:                     # игрок ещё не открывал диалог с ботом
+        print(f"Не удалось отправить магазин игроку {uid} в ЛС: {err_text(e)}")
+        send(peer_id, "📬 Не могу написать вам в личные сообщения. Откройте диалог с ботом и отправьте туда "
+                      f"любое сообщение: https://vk.me/club{GROUP_ID}\nПотом снова напишите «магазин».")
+        return
+    send(peer_id, "📬 Магазин отправлен вам в личные сообщения.")
 
 
 def cmd_wardrobe(msg, rest, slash):
