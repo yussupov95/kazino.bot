@@ -198,6 +198,43 @@ BTC_WORDS = ("бит", "биток", "битки", "биткоин", "битко
 BTC_START_RATE = 1_000_000_000        # стартовый курс: 1 ₿ = 1000кк
 BTC_MAX_RATE = 10 ** 15               # выше курс поставить нельзя
 BTC_IMAGE = _find("bitcoin.jpg")      # картинка биткоина: положите файл рядом с ботом
+# --- Авто-курс биткоина: рынок сам считает цену по экономике игры ---
+BTC_TICK_SECONDS = 600          # как часто курс пересчитывается (сек)
+BTC_CATCHUP_MAX = 24            # бот был выключен: сколько пропущенных обновлений «догнать» при запуске
+BTC_ACTIVE_DAYS = 7             # «активный игрок» — писал в беседе или брал бонус за последние N дней
+BTC_WEALTH_ELASTICITY = 0.7     # капитал игроков +10% → справедливый курс +7%
+BTC_PLAYERS_ELASTICITY = 0.3    # то же для числа активных игроков
+BTC_ECON_SMOOTH = 0.05          # сглаживание показателей экономики (покупка бизнеса не должна сразу ронять курс)
+BTC_REVERT = 0.03               # «притяжение» к справедливой цене: за обновление закрывается ~3% отклонения
+BTC_HEAT_LOW = 0.05             # нормальная доля капитала игроков в биткоине — от 5% до 30%:
+BTC_HEAT_HIGH = 0.30            # выше — рынок перегрет и остывает, ниже — биткоин «никому не нужен» и дешёвый, его подталкивает вверх
+BTC_HEAT_GAIN = 0.03            # сила этого эффекта
+BTC_MOOD_DRIFT = 0.002          # дрейф за обновление в «бычьем»/«медвежьем» настроении рынка
+BTC_MOMENTUM = 0.2              # какая доля прошлого движения переходит в следующее (тренды)
+BTC_VOLATILITY = 0.009          # случайный шум за обновление (~0,9%)
+BTC_STEP_MAX = 0.15             # за одно обновление курс не меняется больше чем на ~15%
+BTC_EVENT_CHANCE = 0.012        # шанс «новости» на обновление (примерно раз в 14 часов)
+BTC_NEWS_TTL = 6 * 3600         # сколько новость висит в «бит»
+BTC_MIN_RATE = BTC_START_RATE // 20           # авто-курс не опускается ниже 50кк
+BTC_AUTO_MAX_RATE = BTC_START_RATE * 100      # ...и не поднимается выше 100ккк
+BTC_DEPTH_SHARE = 0.25          # «глубина» рынка — доля капитала активных игроков...
+BTC_MIN_DEPTH = 300_000_000     # ...но не меньше 300кк
+BTC_IMPACT_K = 0.12             # сила влияния сделок игроков на курс
+BTC_IMPACT_MAX = 0.20           # одна сделка двигает курс не больше чем на 20%
+BTC_HIST_MAX = 432              # история курса для графика: 432 обновления = 3 суток
+BTC_MOODS = {"bull": "🐂 На рынке быки", "bear": "🐻 На рынке медведи", "flat": "😴 На рынке затишье"}
+BTC_NEWS_UP = (
+    "Крупный игрок скупает биткоины",
+    "Бизнесмены вкладывают прибыль в крипту",
+    "Все ищут, куда вложить деньги, — спрос на ₿ растёт",
+    "Ходят слухи, что биткоин скоро подорожает",
+)
+BTC_NEWS_DOWN = (
+    "Крупные игроки фиксируют прибыль — рынок просел",
+    "Паника на рынке: многие продают биткоины",
+    "Кто-то сбросил большой запас ₿ — курс падает",
+    "Игроки несут деньги в бизнес, а не в крипту",
+)
 # Бизнесы: цена и доход в день — в 💰 (500_000_000 = 500кк). Картинки лежат рядом с ботом (лента VK любит 13:8, остальные бот подгонит сам)
 BUSINESSES = {
     "bakery":  {"emoji": "🥐", "name": "Пекарня",    "price": 1_000_000_000,  "income": 10_000_000,
@@ -290,7 +327,7 @@ COMMAND_CATEGORIES = [
     ("💰 Экономика", [
         ("кошелёк", "баланс, опыт и уровень"),
         ("передать СУММА (ответом)", f"перевод игроку: от {_n(TRANSFER_MIN)} до {_n(TRANSFER_MAX)} 💰, не больше {_n(TRANSFER_DAILY_LIMIT)} 💰 в сутки, пауза {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)"),
-        ("бит", "курс биткоина и ваш запас"),
+        ("бит", "курс биткоина (меняется сам по экономике игры), график за сутки и ваш запас"),
         ("купить бит [КОЛ-ВО]", "купить биткоин: «купить бит» — 1 ₿, «купить бит 0,5» — полбиткоина"),
         ("продать бит [КОЛ-ВО | все]", "продать биткоин: «продать бит 0,5», «продать бит» — 1 ₿, «продать бит все» — весь запас"),
         ("бизнес", "магазин бизнесов с фото: Пекарня, Зоомагазин, Автосалон, Казино"),
@@ -725,6 +762,8 @@ def ensure_defaults():
     economy.setdefault("seq", {})
     economy.setdefault("media", {})
     economy.setdefault("btc", {"rate": BTC_START_RATE, "prev": BTC_START_RATE, "t": 0})
+    for _k, _v in (("auto", True), ("hist", []), ("mood", "flat"), ("mood_left", 0), ("tick_t", 0)):
+        economy["btc"].setdefault(_k, _v)
     for key in ("duel", "report", "approval", "roulette"):
         economy["seq"].setdefault(key, 0)
     for key in ("mutes", "bans", "warns", "timeouts", "freezes", "grant_log"):
@@ -1468,17 +1507,24 @@ def cmd_wallet(msg, rest, slash):
 
 
 # ---------------------- Биткоин ----------------------
-# Курс задаёт владелец вручную (секретная команда в его личке, ни в каких справках её нет),
-# а игрокам это выглядит как самостоятельное движение рынка: стрелка и % к прошлому курсу.
+# Курс живёт сам: раз в BTC_TICK_SECONDS бот пересчитывает его по экономике игры (btc_step):
+#   • «справедливая» цена растёт, когда игроки богатеют и их становится больше, и падает, когда они беднеют/уходят;
+#   • если слишком много богатства лежит в ₿ — рынок перегрет и остывает, если почти нет — дешёвый и греется;
+#   • сверху — настроение рынка (быки/медведи), инерция, случайный шум и редкие «новости»;
+#   • покупки и продажи игроков двигают курс сразу (крупная сделка — заметно, мелкая — почти нет).
+# Игрокам это выглядит как самостоятельное движение рынка: стрелка, % к прошлому курсу, график за сутки.
+# Владелец (секретная команда в личке) может вручную поставить курс или заморозить авто-рынок.
 def fmt_btc(units):
     """150000000 → «1,5»; 50000000 → «0,5»."""
     return format((Decimal(units) / BTC_UNIT).normalize(), "f").replace(".", ",")
 
 
 def short_money(n):
-    """1000000000 → «1000кк», 450000000 → «450кк», 1500 → «1.500»."""
-    if n >= 10 ** 6 and n % 10 ** 6 == 0:
-        return f"{n // 10 ** 6}кк"
+    """1000000000 → «1000кк», 450000000 → «450кк», 52400000 → «52,4кк», 1500 → «1.500»."""
+    if n >= 10 ** 6:
+        v = n / 10 ** 6
+        s = f"{v:.0f}" if v >= 100 else f"{v:.1f}".rstrip("0").rstrip(".")
+        return s.replace(".", ",") + "кк"
     if n >= 1000 and n % 1000 == 0:
         return f"{n // 1000}к"
     return _n(n)
@@ -1488,30 +1534,240 @@ def btc_pct(new, old):
     return f"{abs(new - old) * 100 / old:.1f}".replace(".", ",")
 
 
+def btc_change(new, old):
+    if new > old:
+        return f"📈 +{btc_pct(new, old)}%"
+    if new < old:
+        return f"📉 −{btc_pct(new, old)}%"
+    return "➖ без изменений"
+
+
 def btc_trend(b):
     rate, prev = b["rate"], b.get("prev") or b["rate"]
-    if rate > prev:
-        return f"📈 +{btc_pct(rate, prev)}% (было {short_money(prev)})"
-    if rate < prev:
-        return f"📉 −{btc_pct(rate, prev)}% (было {short_money(prev)})"
-    return "➖ без изменений"
+    ch = btc_change(rate, prev)
+    return f"{ch} (было {short_money(prev)})" if rate != prev else ch
 
 
 def btc_attachment(peer_id):
     return cached_photo(peer_id, BTC_IMAGE, "bitcoin") if os.path.exists(BTC_IMAGE) else None
 
 
+# ----- авто-рынок: экономика → справедливая цена → шаг курса -----
+def _round_rate(x):
+    """Курс при пересчёте округляется до 4 значащих цифр: 1.003.000.000, а не 1.003.482.191."""
+    x = max(1, int(x))
+    digits = len(str(x))
+    if digits > 4:
+        step = 10 ** (digits - 4)
+        x = int(round(x / step)) * step
+    return x
+
+
+def btc_bounds(rate):
+    """Пол и потолок авто-курса (если владелец поставил курс за их пределами — он остаётся допустимым)."""
+    return min(BTC_MIN_RATE, rate), max(BTC_AUTO_MAX_RATE, rate)
+
+
+def btc_net_worth(user, rate):
+    """Капитал игрока: деньги + бизнесы (по цене покупки) + биткоины по курсу."""
+    worth = max(0, user.get("money", 0)) + user.get("btc", 0) * rate // BTC_UNIT
+    for k in user.get("biz") or {}:
+        if k in BUSINESSES:
+            worth += BUSINESSES[k]["price"]
+    return worth
+
+
+def btc_snapshot(rate):
+    """Срез экономики: сколько активных игроков, их средний капитал (без верхних 10% — один богач не перекашивает курс),
+    общий капитал и доля богатства, лежащая в биткоинах. Владелец не считается. None — игроков нет."""
+    since = time.time() - BTC_ACTIVE_DAYS * 86400
+    seen = {}
+    for chat in stats.values():
+        for uid, s in chat.items():
+            seen[uid] = max(seen.get(uid, 0), s.get("last") or 0)
+    owner = str(OWNER_ID)
+    players = [u for uid, u in economy["users"].items() if uid != owner]
+    active = [u for uid, u in economy["users"].items()
+              if uid != owner and max(seen.get(uid, 0), u.get("last_bonus") or 0) >= since]
+    rows = active or players            # никто не заходил неделю — считаем по всем
+    if not rows:
+        return None
+    worths = sorted(btc_net_worth(u, rate) for u in rows)
+    held = sum(u.get("btc", 0) * rate // BTC_UNIT for u in rows)
+    kept = worths[:max(1, int(len(worths) * 0.9))]
+    total = sum(worths)
+    return {"n": len(rows), "w": sum(kept) // len(kept), "total": total, "h": (held / total) if total else 0.0}
+
+
+def btc_set_anchor(b, snap):
+    """Запоминает, при какой экономике текущий курс считается «справедливым» — дальше рынок считает от него."""
+    if snap:
+        b.update(base_rate=b["rate"], base_w=max(snap["w"], 1), base_n=max(snap["n"], 1),
+                 w_ema=snap["w"], n_ema=snap["n"])
+
+
+def btc_fair_rate(b):
+    """Справедливая цена по экономике: растёт вместе с капиталом и числом активных игроков."""
+    w = max(b.get("w_ema") or 1, 1) / b["base_w"]
+    n = max(b.get("n_ema") or 1, 1) / b["base_n"]
+    return b["base_rate"] * w ** BTC_WEALTH_ELASTICITY * n ** BTC_PLAYERS_ELASTICITY
+
+
+def btc_pick_mood(dev):
+    """Новое настроение рынка. dev > 0 — курс выше «справедливого»: падение вероятнее, и наоборот."""
+    bear = min(0.6, max(0.1, 0.30 + 1.5 * dev))
+    bull = min(0.6, max(0.1, 0.30 - 1.5 * dev))
+    return random.choices(("bull", "bear", "flat"), weights=(bull, bear, max(0.1, 1 - bull - bear)))[0]
+
+
+def btc_step(b, snap, now):
+    """Один пересчёт курса. Складывается из: притяжения к цене по экономике, перегрева/недооценки,
+    настроения рынка, инерции, случайного шума и редких новостей."""
+    rate = b["rate"]
+    prev = b.get("tick_rate") or rate
+    dev = revert = heat = 0.0
+    fair = None
+    if snap:
+        if not b.get("base_w"):
+            btc_set_anchor(b, snap)
+        b["w_ema"] += BTC_ECON_SMOOTH * (snap["w"] - b["w_ema"])
+        b["n_ema"] += BTC_ECON_SMOOTH * (snap["n"] - b["n_ema"])
+        fair = btc_fair_rate(b)
+        dev = math.log(rate / fair)                                  # > 0 — курс выше справедливого
+        revert = -BTC_REVERT * dev * (1 + (dev / 0.6) ** 2)          # чем дальше от нормы, тем сильнее тянет назад
+        h = snap["h"]                                                # доля капитала игроков, лежащая в ₿
+        heat = (-BTC_HEAT_GAIN * (h - BTC_HEAT_HIGH) if h > BTC_HEAT_HIGH          # перегрев охлаждает,
+                else BTC_HEAT_GAIN * (BTC_HEAT_LOW - h) if h < BTC_HEAT_LOW else 0.0)   # недооценка греет
+
+    b["mood_left"] = b.get("mood_left", 0) - 1
+    if b["mood_left"] <= 0 or b.get("mood") not in ("bull", "bear", "flat"):
+        b["mood"], b["mood_left"] = btc_pick_mood(dev), random.randint(6, 36)
+    drift = {"bull": BTC_MOOD_DRIFT, "bear": -BTC_MOOD_DRIFT}.get(b["mood"], 0.0)
+    momentum = BTC_MOMENTUM * max(-0.05, min(0.05, b.get("ret", 0.0)))
+    noise = random.gauss(0, BTC_VOLATILITY)
+
+    jump = 0.0
+    if random.random() < BTC_EVENT_CHANCE:                           # «новость»: резкий скачок
+        up = random.random() < min(0.8, max(0.2, 0.5 - 1.5 * dev))   # дорогой курс чаще роняют, дешёвый — поднимают
+        size = random.uniform(0.07, 0.14) if random.random() < 0.3 else random.uniform(0.025, 0.06)
+        jump = size if up else -size
+        b["news"] = {"t": int(now), "up": up, "text": random.choice(BTC_NEWS_UP if up else BTC_NEWS_DOWN)}
+
+    change = max(-BTC_STEP_MAX, min(BTC_STEP_MAX, revert + heat + drift + momentum + noise + jump))
+    lo, hi = btc_bounds(rate)
+    new = max(lo, min(hi, _round_rate(rate * math.exp(change))))
+
+    b["prev"], b["rate"], b["tick_rate"], b["t"] = prev, new, new, int(now)
+    b["ret"] = math.log(new / prev)
+    b["fair"], b["dev"] = (int(fair) if fair else 0), round(dev, 4)
+    hist = b.setdefault("hist", [])
+    if not hist:
+        hist.append([int(now) - BTC_TICK_SECONDS, prev])
+    hist.append([int(now), new])
+    del hist[:-BTC_HIST_MAX]
+
+
+def btc_market_step():
+    """Раз в BTC_TICK_SECONDS пересчитывает курс (если владелец не выключил авто-рынок).
+    Бот был выключен — «догоняет» пропущенные обновления (не больше BTC_CATCHUP_MAX)."""
+    b = economy["btc"]
+    now = time.time()
+    last = b.get("tick_t") or 0
+    if not b.get("auto", True) or now - last < BTC_TICK_SECONDS:
+        return
+    due = int((now - last) // BTC_TICK_SECONDS) if last else 1
+    steps = max(1, min(due, BTC_CATCHUP_MAX))
+    snap = btc_snapshot(b["rate"])
+    for i in range(steps):
+        btc_step(b, snap, now - (steps - 1 - i) * BTC_TICK_SECONDS)
+    b["tick_t"] = int(now)
+    if snap:
+        b["snap"] = {"n": snap["n"], "w": snap["w"], "total": snap["total"], "h": round(snap["h"], 4), "t": int(now)}
+    else:
+        b.pop("snap", None)
+    save_economy()
+
+
+def check_btc_market():
+    """Вызывается из tick_loop каждую секунду; сам решает, пора ли пересчитывать курс."""
+    try:
+        btc_market_step()
+    except Exception as e:
+        economy["btc"]["tick_t"] = int(time.time())     # чтобы ошибка не повторялась каждую секунду
+        print(f"Ошибка рынка биткоина: {err_text(e)}")
+
+
+def btc_depth():
+    """«Глубина» рынка: чем больше капитал игроков, тем труднее сдвинуть курс одной сделкой."""
+    total = (economy["btc"].get("snap") or {}).get("total", 0)
+    return max(BTC_MIN_DEPTH, int(total * BTC_DEPTH_SHARE))
+
+
+def btc_impact(money):
+    """На сколько (в логарифмах) сделка на сумму money сдвигает курс: крупная — заметно, мелкая — почти нет."""
+    return min(BTC_IMPACT_MAX, BTC_IMPACT_K * math.log1p(money / btc_depth()))
+
+
+# ----- как это видит игрок -----
+def btc_chart(b, points=14):
+    """График курса за сутки одной строкой: ▁▂▃▅▇."""
+    cut = time.time() - 86400
+    vals = [r for t, r in b.get("hist", []) if t >= cut] + [b["rate"]]
+    if len(vals) < 4:
+        return ""
+    if len(vals) > points:
+        vals = [vals[round(i * (len(vals) - 1) / (points - 1))] for i in range(points)]
+    lo, hi = min(vals), max(vals)
+    if hi == lo:
+        return "▄" * len(vals)
+    return "".join("▁▂▃▄▅▆▇█"[round((v - lo) * 7 / (hi - lo))] for v in vals)
+
+
+def btc_day_line(b):
+    """«За 24 ч: 📉 −3,4% · мин 950кк · макс 1040кк»; пока истории мало — пусто."""
+    now = time.time()
+    pts = [(t, r) for t, r in b.get("hist", []) if t >= now - 86400]
+    if len(pts) < 4:
+        return None
+    rates = [r for _, r in pts] + [b["rate"]]
+    span = now - pts[0][0]
+    label = "24 ч" if span >= 23 * 3600 else f"{max(1, round(span / 3600))} ч"
+    return (f"За {label}: {btc_change(b['rate'], rates[0])} · "
+            f"мин {short_money(min(rates))} · макс {short_money(max(rates))}")
+
+
 def cmd_btc(msg, rest, slash):
-    """«бит» / «курс бит»: курс биткоина, динамика и запас игрока (с картинкой)."""
+    """«бит» / «курс бит»: курс биткоина, динамика, график, новости и запас игрока (с картинкой)."""
     peer_id = msg["peer_id"]
     user = get_user(msg["from_id"])
     b = economy["btc"]
+    now = time.time()
     own = user.get("btc", 0)
+    auto = b.get("auto", True)
     lines = ["₿ Биткоин", "",
              f"Курс: 1 ₿ = {fmt_num(b['rate'])} 💰 ({short_money(b['rate'])})",
              btc_trend(b)]
+    day = btc_day_line(b)
+    if day:
+        lines.append(day)
+    chart = btc_chart(b)
+    if chart:
+        lines.append(f"📊 {chart}")
+    if auto and b.get("mood") in BTC_MOODS and b.get("tick_t"):
+        lines.append(BTC_MOODS[b["mood"]])
+    news = b.get("news")
+    if news and now - news.get("t", 0) < BTC_NEWS_TTL:
+        lines.append(f"📰 {news['text']}")
+    snap = b.get("snap")
+    if snap:
+        lines.append(f"🌍 Активных игроков: {snap['n']} · средний капитал: {short_money(int(snap['w']))} · "
+                     f"в ₿ лежит {snap['h'] * 100:.0f}% капитала")
     if b.get("t"):
-        lines.append(f"🕒 Обновлён: {fmt_time(b['t'])}")
+        upd = f"🕒 Обновлён: {fmt_time(b['t'])}"
+        if auto and b.get("tick_t"):
+            left = max(0, b["tick_t"] + BTC_TICK_SECONDS - now)
+            upd += f" · следующее через {fmt_duration(left)}"
+        lines.append(upd)
     lines += ["", f"У вас: {fmt_btc(own)} ₿" + (f" ≈ {fmt_num(own * b['rate'] // BTC_UNIT)} 💰" if own else ""),
               f"Баланс: {fmt_num(user['money'])} 💰", "",
               "Купить: «купить бит» (1 ₿) или «купить бит 0,5»",
@@ -1531,10 +1787,13 @@ def parse_btc_qty(arg):
 
 
 def btc_trade(msg, arg, sell):
-    """Покупка / продажа по текущему курсу. Без количества — 1 ₿; при продаже «все» — весь запас."""
+    """Покупка / продажа. Без количества — 1 ₿; при продаже «все» — весь запас.
+    Крупная сделка двигает курс (покупка — вверх, продажа — вниз) и исполняется по средней цене между «до» и «после»:
+    купить и сразу продать с выгодой нельзя."""
     peer_id, uid = msg["peer_id"], msg["from_id"]
     user = get_user(uid)
-    rate = economy["btc"]["rate"]
+    b = economy["btc"]
+    rate = b["rate"]
     word = arg.strip().lower().replace("ё", "е")
     have = user.get("btc", 0)
     if sell and word in ("все", "all"):
@@ -1549,29 +1808,39 @@ def btc_trade(msg, arg, sell):
             send(peer_id, f"ℹ️ Укажите количество числом: «{cmd} бит 1» или «{cmd} бит 0,5» "
                           f"(до 8 знаков после запятой){', «продать бит все» — весь запас' if sell else ''}.")
             return
+    shift = btc_impact(rate * units // BTC_UNIT)                         # на сколько сделка сдвинет курс
+    avg = int(math.exp((-shift if sell else shift) / 2) * 10 ** 9)      # средняя цена сделки к курсу (×10⁹, без float-ошибок)
     if sell:
         if have < units:
             send(peer_id, f"⚠ Недостаточно биткоинов. У вас: {fmt_btc(have)} ₿")
             return
-        money = rate * units // BTC_UNIT
+        money = rate * units * avg // (BTC_UNIT * 10 ** 9)
         if money < 1:
             send(peer_id, "⚠ Слишком маленькое количество.")
             return
         user["btc"] = have - units
         user["money"] += money
+        new_rate = rate * math.exp(-shift)
         head = f"🔴 Продано: {fmt_btc(units)} ₿ за {fmt_num(money)} 💰"
     else:
-        money = -(-rate * units // BTC_UNIT)          # покупка округляется вверх, продажа — вниз
+        money = -(-rate * units * avg // (BTC_UNIT * 10 ** 9))          # покупка округляется вверх, продажа — вниз
         if user["money"] < money:
             send(peer_id, f"⚠ Недостаточно денег: {fmt_btc(units)} ₿ стоит {fmt_num(money)} 💰, "
                           f"у вас {fmt_num(user['money'])} 💰")
             return
         user["money"] -= money
         user["btc"] = have + units
+        new_rate = rate * math.exp(shift)
         head = f"🟢 Куплено: {fmt_btc(units)} ₿ за {fmt_num(money)} 💰"
+    lo, hi = btc_bounds(rate)
+    b["rate"] = max(lo, min(hi, int(new_rate)))
     save_economy()
     log_action(peer_id, uid, f"{'продал' if sell else 'купил'} {fmt_btc(units)} BTC за {money} (курс {rate})")
-    send(peer_id, f"{head}\nКурс: 1 ₿ = {short_money(rate)}\n"
+    if shift >= 0.001 and b["rate"] != rate:
+        rate_line = f"Курс после сделки: 1 ₿ = {short_money(b['rate'])} ({btc_change(b['rate'], rate)})"
+    else:
+        rate_line = f"Курс: 1 ₿ = {short_money(b['rate'])}"
+    send(peer_id, f"{head}\n{rate_line}\n"
                   f"У вас: {fmt_btc(user.get('btc', 0))} ₿ · Баланс: {fmt_num(user['money'])} 💰")
 
 
@@ -1584,17 +1853,52 @@ def cmd_sell(msg, rest, slash):
     btc_trade(msg, words[1] if len(words) > 1 else "", sell=True)
 
 
+def owner_btc_status(b):
+    """Подробности авто-рынка — только владельцу."""
+    now = time.time()
+    lines = [f"₿ Авто-рынок: {'ВКЛ' if b.get('auto', True) else 'ВЫКЛ'}",
+             f"Курс: {short_money(b['rate'])}"]
+    if b.get("fair"):
+        lines.append(f"По экономике: ≈ {short_money(b['fair'])} (курс {'выше' if b.get('dev', 0) > 0 else 'ниже'} на "
+                     f"{abs(b.get('dev', 0)) * 100:.1f}%)".replace(".", ","))
+    if b.get("mood") in BTC_MOODS:
+        lines.append(f"Настроение: {BTC_MOODS[b['mood']]} (ещё ~{max(0, b.get('mood_left', 0))} обн.)")
+    snap = b.get("snap")
+    if snap:
+        lines.append(f"Игроков: {snap['n']} · средний капитал: {short_money(int(snap['w']))} · "
+                     f"всего: {short_money(int(snap['total']))} · в ₿: {snap['h'] * 100:.0f}%")
+    if b.get("tick_t") and b.get("auto", True):
+        lines.append(f"Обновление раз в {BTC_TICK_SECONDS // 60} мин, следующее через "
+                     f"{fmt_duration(max(0, b['tick_t'] + BTC_TICK_SECONDS - now))}")
+    lines += ["", "Вручную: «курс бит 900кк». Заморозить: «курс бит авто выкл», вернуть: «курс бит авто вкл»."]
+    return "\n".join(lines)
+
+
 def owner_btc_command(msg, text):
-    """СЕКРЕТ, только личка владельца: «курс бит 900кк» (или «курс бит из 1000кк до 900кк») ставит курс.
+    """СЕКРЕТ, только личка владельца: «курс бит 900кк» (или «курс бит из 1000кк до 900кк») ставит курс,
+    «курс бит авто» — состояние рынка, «курс бит авто выкл/вкл» — заморозить/вернуть авто-рынок.
     Нигде не упоминается в справках и не пишется в логи. True — сообщение обработано."""
     words = text.lower().replace("ё", "е").split()
     if len(words) < 2 or words[0] not in ("курс", "rate") or words[1] not in BTC_WORDS:
         return False
     peer_id = msg["peer_id"]
     b = economy["btc"]
+    if len(words) >= 3 and words[2] in ("авто", "auto"):
+        arg = words[3] if len(words) > 3 else ""
+        if arg in ("выкл", "off", "стоп"):
+            b["auto"] = False
+            save_economy()
+            send(peer_id, "⏸ Авто-рынок выключен: курс стоит, пока вы не включите его («курс бит авто вкл»).")
+        elif arg in ("вкл", "on", "старт"):
+            b["auto"], b["tick_t"] = True, int(time.time())
+            save_economy()
+            send(peer_id, f"▶️ Авто-рынок включён: курс пересчитывается раз в {BTC_TICK_SECONDS // 60} мин.")
+        else:
+            send(peer_id, owner_btc_status(b))
+        return True
     amounts = [a for a in (parse_amount(w, regex=OWNER_AMOUNT_RE) for w in words[2:]) if a]
     if not amounts:
-        send(peer_id, f"₿ Сейчас: {short_money(b['rate'])}. Поставить: «курс бит 900кк»")
+        send(peer_id, owner_btc_status(b))
         return True
     new, old = amounts[-1], b["rate"]
     if not 1 <= new <= BTC_MAX_RATE:
@@ -1603,10 +1907,18 @@ def owner_btc_command(msg, text):
     if new == old:
         send(peer_id, f"ℹ️ Курс уже {short_money(old)}.")
         return True
-    b["prev"], b["rate"], b["t"] = old, new, int(time.time())
+    now = int(time.time())
+    b["prev"], b["rate"], b["t"] = old, new, now
+    b["tick_rate"], b["tick_t"] = new, now                    # следующий авто-пересчёт — через полный интервал
+    b["ret"] = max(-0.05, min(0.05, math.log(new / old)))     # ручной скачок даёт рынку инерцию
+    btc_set_anchor(b, btc_snapshot(new))                      # новый курс — новая «справедливая» цена для текущей экономики
+    hist = b.setdefault("hist", [])
+    hist.append([now, new])
+    del hist[:-BTC_HIST_MAX]
     save_economy()
+    note = "Авто-рынок продолжит от этого курса." if b.get("auto", True) else "Авто-рынок выключен — курс стоит."
     send(peer_id, f"✅ Курс биткоина: {short_money(old)} → {short_money(new)} "
-                  f"({'+' if new > old else '−'}{btc_pct(new, old)}%)")
+                  f"({'+' if new > old else '−'}{btc_pct(new, old)}%)\n{note}")
     return True
 
 
@@ -4376,7 +4688,7 @@ LOCK = threading.RLock()
 
 
 def tick_loop():
-    """Раз в секунду: таймеры дуэлей, итоги рулетки, возврат ставок за игры, которые не показались."""
+    """Раз в секунду: таймеры дуэлей, итоги рулетки, возврат ставок за игры, которые не показались, авто-курс биткоина."""
     while True:
         time.sleep(1)
         try:
@@ -4386,6 +4698,7 @@ def tick_loop():
                 check_stuck_games()
                 check_report_dialogs()
                 prune_promos()
+                check_btc_market()
         except Exception as e:
             print(f"Ошибка таймера: {err_text(e)}")
 def send_get_cmid(peer_id, text, keyboard=None, attachment=None):
