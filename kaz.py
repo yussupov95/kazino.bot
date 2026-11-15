@@ -3,7 +3,7 @@
 VK-бот для бесед.
 
 Для всех:       команды, профиль, префикс, топ, история, правила, бонус, кошелёк, передать,
-                купить вип, бит (биткоин), рыбалка, мины, дуэль, рулетка, промокод, репорт, админы
+                купить вип, бит (биткоин), бизнес, доход, рыбалка, мины, дуэль, рулетка, промокод, репорт, админы
 Мл Модератор:   хелп, удалить, профиль (чужой), варн
 Ст Модератор:   мут, размут, снять варн
 Администратор:  права, кик, бан, разбан, префикс (смена), timeout
@@ -198,6 +198,18 @@ BTC_WORDS = ("бит", "биток", "битки", "биткоин", "битко
 BTC_START_RATE = 1_000_000_000        # стартовый курс: 1 ₿ = 1000кк
 BTC_MAX_RATE = 10 ** 15               # выше курс поставить нельзя
 BTC_IMAGE = _find("bitcoin.jpg")      # картинка биткоина: положите файл рядом с ботом
+# Бизнесы: цена и доход в день — в 💰 (500_000_000 = 500кк). Картинки лежат рядом с ботом (лента VK любит 13:8, остальные бот подгонит сам)
+BUSINESSES = {
+    "bakery":  {"emoji": "🥐", "name": "Пекарня",    "price": 1_000_000_000,  "income": 10_000_000,
+                "desc": "Свежий хлеб и круассаны каждый день", "file": "bakery.jpg"},
+    "petshop": {"emoji": "🐾", "name": "Зоомагазин", "price": 2_500_000_000,  "income": 25_000_000,
+                "desc": "Питомцы, корм и всё для них", "file": "petshop.jpg"},
+    "carshop": {"emoji": "🚗", "name": "Автосалон",  "price": 5_000_000_000,  "income": 50_000_000,
+                "desc": "Новые автомобили для взыскательных клиентов", "file": "carshop.jpg"},
+    "casino":  {"emoji": "🎰", "name": "Казино",     "price": 10_000_000_000, "income": 100_000_000,
+                "desc": "Азарт, фишки и огромные ставки", "file": "casino.jpg"},
+}
+BIZ_MAX_HOURS = 0                     # сколько часов дохода копится максимум (0 — без ограничения, 24 — не больше суток)
 
 REP_COOLDOWN = 3600             # +реп / -реп: раз в час
 FREEZE_FOREVER = 10 * 365 * 86400   # «заморозить» без срока
@@ -281,6 +293,8 @@ COMMAND_CATEGORIES = [
         ("бит", "курс биткоина и ваш запас"),
         ("купить бит [КОЛ-ВО]", "купить биткоин: «купить бит» — 1 ₿, «купить бит 0,5» — полбиткоина"),
         ("продать бит [КОЛ-ВО | все]", "продать биткоин: «продать бит 0,5», «продать бит» — 1 ₿, «продать бит все» — весь запас"),
+        ("бизнес", "магазин бизнесов с фото: Пекарня, Зоомагазин, Автосалон, Казино"),
+        ("доход", "забрать накопившийся доход со всех ваших бизнесов"),
         ("купить вип", f"VIP на {VIP_DAYS} дней за {_n(VIP_PRICE)} 💰: бонус {_n(VIP_BONUS_MONEY)} 💰 в час, выигрыши x{VIP_WIN_BONUS}, префикс {VIP_PREFIX}"),
     ]),
     ("👤 Профиль и беседа", [
@@ -355,7 +369,8 @@ TIME_UNITS = {"м": 60, "m": 60, "ч": 3600, "h": 3600, "д": 86400, "d": 86400}
 BARE_COMMANDS = {"команды", "commands", "хелп", "help", "удалить", "delete",
                  "топ", "top", "бонус", "bonus", "кошелек", "wallet",
                  "история", "history", "репорт", "report", "правила", "rules", "рыбалка", "fishing", "бэкап", "backup", "магазин", "shop", "гардероб", "wardrobe",
-                 "бит", "биткоин", "btc", "bitcoin"}
+                 "бит", "биткоин", "btc", "bitcoin",
+                 "бизнес", "бизнесы", "business", "доход", "income"}
 
 
 # ---------------------- Хранилища ----------------------
@@ -1200,7 +1215,7 @@ def handle_callback(ev):
     if cmd == "rate":                 # оценка следящего игроком (звёздочки в ЛС)
         handle_rate_callback(ev, payload)
         return
-    if ev["peer_id"] < CHAT_OFFSET and cmd != "shop":   # всё остальное работает только в беседах (магазин — и в ЛС)
+    if ev["peer_id"] < CHAT_OFFSET and cmd not in ("shop", "biz"):   # всё остальное работает только в беседах (магазин и бизнесы — и в ЛС)
         answer_event(ev, "Эта кнопка работает только в беседе.")
         return
 
@@ -1211,7 +1226,7 @@ def handle_callback(ev):
         return
 
     actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action,
-               "roul": roulette_action, "fish": fish_action, "shop": shop_action}
+               "roul": roulette_action, "fish": fish_action, "shop": shop_action, "biz": biz_action}
     if cmd in actions:
         note = None
         try:
@@ -1446,6 +1461,9 @@ def cmd_wallet(msg, rest, slash):
         lines.append(f"✨ VIP: до {fmt_time(user['vip_until'])}")
     if user.get("btc", 0) > 0:
         lines.append(f"₿ Биткоин: {fmt_btc(user['btc'])} (≈ {fmt_num(user['btc'] * economy['btc']['rate'] // BTC_UNIT)} 💰)")
+    if user.get("biz"):
+        lines.append(f"🏢 Бизнес: {', '.join(BUSINESSES[k]['name'] for k in BUSINESSES if k in user['biz'])} — "
+                     f"{kk_text(sum(BUSINESSES[k]['income'] for k in user['biz'] if k in BUSINESSES))} 💰 в день («доход»)")
     send(msg["peer_id"], "\n".join(lines))
 
 
@@ -1590,6 +1608,236 @@ def owner_btc_command(msg, text):
     send(peer_id, f"✅ Курс биткоина: {short_money(old)} → {short_money(new)} "
                   f"({'+' if new > old else '−'}{btc_pct(new, old)}%)")
     return True
+
+
+# ---------------------- Бизнес ----------------------
+# Купил бизнес — он сам копит доход (сумма «в день» копится по секундам). Забрать всё разом: команда «доход».
+# У игрока: user["biz"] = {ключ бизнеса: время последнего сбора}. Лента с фото — как в магазине (в ЛС).
+_biz_sessions = {}      # (чат, игрок) → сообщение с последней лентой (убираем, когда открывается новая)
+
+
+def kk_text(n):
+    """500000000 → «500кк», 2000000000 → «2ккк», 2500000000 → «2,5ккк», 150000000 → «150кк»."""
+    if n >= 10 ** 9 and n % 10 ** 8 == 0:
+        return f"{n / 10 ** 9:g}".replace(".", ",") + "ккк"
+    if n >= 10 ** 6 and n % 10 ** 6 == 0:
+        return f"{n // 10 ** 6}кк"
+    return _n(n)
+
+
+def biz_owned(user):
+    return user.get("biz") or {}
+
+
+def biz_accrued(user, key, now):
+    """Сколько бизнес накопил с последнего сбора."""
+    elapsed = max(0, int(now - biz_owned(user)[key]))
+    if BIZ_MAX_HOURS > 0:
+        elapsed = min(elapsed, BIZ_MAX_HOURS * 3600)
+    return BUSINESSES[key]["income"] * elapsed // 86400
+
+
+def biz_image_path(key):
+    """Файл бизнеса в формате 13:8 (как у персонажей в магазине): чужой размер ставится по центру на размытый фон."""
+    raw = _find(BUSINESSES[key]["file"])
+    if not os.path.exists(raw):
+        return None
+    try:
+        from PIL import Image, ImageFilter, ImageOps
+        im = ImageOps.exif_transpose(Image.open(raw)).convert("RGB")
+        w, h = im.size
+        if abs(w / h - 13 / 8) < 0.01:
+            return raw
+        out = os.path.join(ROULETTE_CACHE_DIR, f"fit_biz_{key}_{int(os.path.getmtime(raw))}.jpg")
+        if not os.path.exists(out):
+            os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
+            W, H = 1040, 640
+            canvas = im.resize((W, H)).filter(ImageFilter.GaussianBlur(28))
+            k = min(W / w, H / h)
+            fg = im.resize((max(1, int(w * k)), max(1, int(h * k))), Image.LANCZOS)
+            canvas.paste(fg, ((W - fg.width) // 2, (H - fg.height) // 2))
+            canvas.save(out, quality=92)
+        return out
+    except Exception as e:
+        print(f"Не удалось подогнать {raw} под 13:8 (pip install pillow): {err_text(e)}")
+        return raw
+
+
+def biz_preview(peer_id, key):
+    path = biz_image_path(key)
+    return cached_photo(peer_id, path, f"biz_{key}") if path else None
+
+
+def biz_button(uid, key, kind, idx=0):
+    """(подпись, payload) кнопки под бизнесом."""
+    if key in biz_owned(get_user(uid)):
+        label, act = "✅ Куплено", "have"
+    else:
+        label, act = f"Купить {kk_text(BUSINESSES[key]['price'])}", "buy"
+    return label, {"cmd": "biz", "a": act, "i": key, "o": uid, "k": kind, "x": idx}
+
+
+def biz_head(uid):
+    return (f"💼 Бизнесы — листайте вправо ➡\n💰 Баланс: {fmt_num(get_user(uid)['money'])}\n"
+            "Копившийся доход забирает команда «доход».")
+
+
+def biz_elements(peer_id, uid):
+    user = get_user(uid)
+    elements = []
+    for key, b in BUSINESSES.items():
+        tail = "✅ Куплено" if key in biz_owned(user) else f"Цена {kk_text(b['price'])}"
+        label, payload = biz_button(uid, key, "c")
+        el = {
+            "title": f"{b['emoji']} {b['name']}"[:80],
+            "description": f"Доход {kk_text(b['income'])}/день · {tail}"[:80],
+            "buttons": [{"action": {"type": "callback", "label": label[:36],
+                                    "payload": json.dumps(payload, ensure_ascii=False)}}],
+        }
+        att = biz_preview(peer_id, key)
+        if att:
+            el["photo_id"] = att[len("photo"):]
+            el["action"] = {"type": "open_photo"}
+        elements.append(el)
+    return elements
+
+
+def biz_card(peer_id, uid, idx):
+    """Запасной вариант без карусели: одна карточка с листалкой кнопками."""
+    keys = list(BUSINESSES)
+    idx %= len(keys)
+    key = keys[idx]
+    b = BUSINESSES[key]
+    user = get_user(uid)
+    state = "✅ Куплено" if key in biz_owned(user) else f"Цена: {fmt_num(b['price'])} 💰 ({kk_text(b['price'])})"
+    text = (f"{b['emoji']} {b['name']} ({idx + 1}/{len(keys)})\n\n{b['desc']}\n"
+            f"Доход: {fmt_num(b['income'])} 💰 в день ({kk_text(b['income'])})\n{state}\n"
+            f"💰 Баланс: {fmt_num(user['money'])}")
+    kb = VkKeyboard(inline=True)
+    base = {"cmd": "biz", "o": uid, "k": "f"}
+    kb.add_callback_button("◀ Назад", VkKeyboardColor.SECONDARY, dict(base, a="pg", x=idx - 1))
+    kb.add_callback_button(f"{idx + 1}/{len(keys)}", VkKeyboardColor.SECONDARY, dict(base, a="pg", x=idx))
+    kb.add_callback_button("Вперед ▶", VkKeyboardColor.SECONDARY, dict(base, a="pg", x=idx + 1))
+    kb.add_line()
+    label, payload = biz_button(uid, key, "f", idx)
+    kb.add_callback_button(label, VkKeyboardColor.POSITIVE, payload)
+    kb.add_line()
+    kb.add_callback_button("✖ Закрыть", VkKeyboardColor.NEGATIVE, dict(base, a="close"))
+    return text, kb.get_keyboard(), biz_preview(peer_id, key)
+
+
+def biz_open(peer_id, uid):
+    """Присылает ленту бизнесов (карусель с фото) в peer_id."""
+    old = _biz_sessions.pop((peer_id, uid), None)
+    if old:
+        delete_message(peer_id, old)
+    if CAROUSEL_OK["ok"]:
+        try:
+            res = vk.messages.send(peer_ids=peer_id, message=biz_head(uid),
+                                   template=carousel_json(biz_elements(peer_id, uid)),
+                                   random_id=get_random_id(), disable_mentions=1)
+            _biz_sessions[(peer_id, uid)] = res[0].get("conversation_message_id")
+            return
+        except Exception as e:
+            if getattr(e, "code", None) in (901, 902, 917):      # ЛС закрыты — карусель тут ни при чём
+                raise
+            print(f"Карусель не принята ({err_text(e)}) — ленты переключены на листалку кнопками")
+            CAROUSEL_OK["ok"] = False
+    text, kb, att = biz_card(peer_id, uid, 0)
+    _biz_sessions[(peer_id, uid)] = send_get_cmid(peer_id, text, kb, attachment=att)
+
+
+def biz_refresh(peer_id, uid, cmid, p):
+    """Обновляет сообщение, на котором нажали кнопку («Купить» → «✅ Куплено»)."""
+    if p.get("k") == "f":
+        text, kb, att = biz_card(peer_id, uid, int(p.get("x", 0)))
+        edit_message(peer_id, cmid, text, kb, attachment=att)
+        return
+    vk.messages.edit(peer_id=peer_id, conversation_message_id=cmid, message=biz_head(uid),
+                     template=carousel_json(biz_elements(peer_id, uid)), disable_mentions=1)
+
+
+def biz_buy(peer_id, uid, key):
+    b = BUSINESSES[key]
+    user = get_user(uid)
+    if key in biz_owned(user):
+        return f"Уже куплено: {b['name']}"
+    if user["money"] < b["price"]:
+        return f"Не хватает {fmt_num(b['price'] - user['money'])} 💰"
+    user["money"] -= b["price"]
+    user.setdefault("biz", {})[key] = time.time()
+    save_economy()
+    log_action(peer_id, uid, f"купил бизнес «{b['name']}» за {b['price']}")
+    return f"✅ Куплено: {b['name']}. Доход — команда «доход»"[:90]
+
+
+def biz_action(ev, p):
+    peer_id, uid, cmid = ev["peer_id"], ev["user_id"], ev["conversation_message_id"]
+    if uid != p.get("o"):
+        return "Это не ваш список. Напишите «бизнес» сами."
+    act = p.get("a")
+    if act == "close":
+        answer_event(ev)
+        delete_message(peer_id, cmid)
+        _biz_sessions.pop((peer_id, uid), None)
+        return None
+    if act == "pg":
+        answer_event(ev)
+        biz_refresh(peer_id, uid, cmid, p)
+        return None
+    if act == "have":
+        return "Уже куплено. Забрать доход — команда «доход»."
+    if act == "buy":
+        key = p.get("i")
+        if key not in BUSINESSES:
+            return "Такого бизнеса нет."
+        note = biz_buy(peer_id, uid, key)
+        answer_event(ev, note)              # подсказка игроку, кнопка не «крутится»
+        biz_refresh(peer_id, uid, cmid, p)
+        return None
+    return None
+
+
+def cmd_biz(msg, rest, slash):
+    """«бизнес»: лента бизнесов с фото. Как и магазин, приходит в личные сообщения."""
+    peer_id, uid = msg["peer_id"], msg["from_id"]
+    if peer_id < CHAT_OFFSET:                  # написали прямо в ЛС боту
+        biz_open(peer_id, uid)
+        return
+    try:
+        biz_open(uid, uid)
+    except Exception as e:                     # игрок ещё не открывал диалог с ботом
+        print(f"Не удалось отправить бизнесы игроку {uid} в ЛС: {err_text(e)}")
+        send(peer_id, "📬 Не могу написать вам в личные сообщения. Откройте диалог с ботом и отправьте туда "
+                      f"любое сообщение: https://vk.me/club{GROUP_ID}\nПотом снова напишите «бизнес».")
+        return
+    send(peer_id, "📬 Бизнесы отправлены вам в личные сообщения.")
+
+
+def cmd_income(msg, rest, slash):
+    """«доход»: забрать деньги, накопленные всеми бизнесами."""
+    peer_id, uid = msg["peer_id"], msg["from_id"]
+    user = get_user(uid)
+    owned_now = [k for k in BUSINESSES if k in biz_owned(user)]
+    if not owned_now:
+        send(peer_id, "💼 У вас пока нет бизнеса. Посмотреть и купить: «бизнес»")
+        return
+    now = time.time()
+    got = {k: biz_accrued(user, k, now) for k in owned_now}
+    total = sum(got.values())
+    if total < 1:
+        send(peer_id, "💼 Доход ещё не накопился. Ваши бизнесы приносят "
+                      f"{kk_text(sum(BUSINESSES[k]['income'] for k in owned_now))} 💰 в день.")
+        return
+    user["money"] += total
+    for k in owned_now:
+        user["biz"][k] = now
+    save_economy()
+    log_action(peer_id, uid, f"забрал доход с бизнеса: {total}")
+    lines = [f"💵 Доход собран: +{fmt_num(total)} 💰", ""]
+    lines += [f"{BUSINESSES[k]['emoji']} {BUSINESSES[k]['name']}: +{fmt_num(v)}" for k, v in got.items()]
+    lines += ["", f"💰 Баланс: {fmt_num(user['money'])}"]
+    send(peer_id, "\n".join(lines))
 
 
 # ---------------------- Промокоды ----------------------
@@ -3970,6 +4218,18 @@ def handle_dm(msg):
             menu_text, menu_kb = shop_menu_page(uid, "shop")
             send(peer_id, menu_text, menu_kb)
         return
+    low_dm = text.lower().strip(" .!?")
+    if (low_dm in ("бизнес", "бизнесы", "business", "доход", "income") and not active_dialog_of(uid)
+            and not any(r.get("status") == "open" and r.get("staff") == uid for r in economy["reports"].values())
+            and not (uid == OWNER_ID and economy.get("report_wait"))):
+        left = freeze_left(uid) if uid != OWNER_ID else 0
+        if left > 0:
+            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}.")
+        elif low_dm in ("доход", "income"):
+            cmd_income({"peer_id": peer_id, "from_id": uid}, "", False)
+        else:
+            biz_open(peer_id, uid)
+        return
     if uid == OWNER_ID:
         if owner_btc_command(msg, text):            # секрет: курс биткоина
             return
@@ -6223,6 +6483,8 @@ register(("кошелек", "wallet"), cmd_wallet)   # «ё» заменяетс
 register(("купить", "buy"), cmd_buy)
 register(("продать", "sell"), cmd_sell)
 register(("бит", "биткоин", "btc", "bitcoin"), cmd_btc)
+register(("бизнес", "бизнесы", "business"), cmd_biz)
+register(("доход", "income"), cmd_income)
 register(("передать", "transfer"), cmd_transfer)
 register(("мины", "mines"), cmd_mines)
 register(("дуэль", "duel"), cmd_duel)
@@ -6339,6 +6601,8 @@ def main():
     for _f in CHAR_FILES.values():
         print(f"  картинка {_f}: " + (f"найдена ({_find(_f)})" if os.path.exists(_find(_f)) else "НЕ НАЙДЕНА — положите рядом с ботом"))
     print("  картинка bitcoin.jpg: " + (f"найдена ({BTC_IMAGE})" if os.path.exists(BTC_IMAGE) else "НЕ НАЙДЕНА — положите рядом с ботом"))
+    for _k, _b in BUSINESSES.items():
+        print(f"  картинка {_b['file']} ({_b['name']}): " + ("найдена" if os.path.exists(_find(_b["file"])) else "НЕ НАЙДЕНА — положите рядом с ботом"))
     print("Бот запущен")
     try:
         while True:
