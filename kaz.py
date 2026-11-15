@@ -3,7 +3,7 @@
 VK-бот для бесед.
 
 Для всех:       команды, профиль, префикс, топ, история, правила, бонус, кошелёк, передать,
-                купить вип, рыбалка, мины, дуэль, рулетка, промокод, репорт, админы
+                купить вип, бит (биткоин), рыбалка, мины, дуэль, рулетка, промокод, репорт, админы
 Мл Модератор:   хелп, удалить, профиль (чужой), варн
 Ст Модератор:   мут, размут, снять варн
 Администратор:  права, кик, бан, разбан, префикс (смена), timeout
@@ -138,6 +138,9 @@ HISTORY_DAYS = 7                # сколько прошлых топов хр�
 HISTORY_PAGES = 2               # страницы «истории»: промокоды, прошлые топы
 TRANSFER_MIN = 500_000          # передать: от 500к
 TRANSFER_MAX = 50_000_000       # передать: до 50кк
+TRANSFER_DAILY_LIMIT = 50_000_000     # защита экономики: один игрок может ПЕРЕДАТЬ не больше этого за сутки (0 — выключить)
+TRANSFER_RECEIVE_LIMIT = 100_000_000  # ...а ПОЛУЧИТЬ переводами — не больше этого за сутки (от слива через «альтов»; 0 — выключить)
+                                      # Владелец не ограничен: ни его переводы, ни переводы ему не считаются
 MAX_GRANT = 10 ** 15            # максимум денег за одну выдачу («деньги»)
 MAX_EXP_GRANT = 100_000         # максимум опыта за одну выдачу («опыт»)
 
@@ -190,6 +193,11 @@ FISH_COMMON = 500_000           # обычная рыба — 500к
 FISH_MEDIUM_RANGE = (1_000_000, 2_000_000)   # хорошая — 1–2кк
 FISH_RARE_RANGE = (5_000_000, 10_000_000)    # редкая — 5–10кк
 FISH_IMAGE = _find("fishing.jpg")      # своя картинка: положите файл рядом с ботом
+BTC_UNIT = 10 ** 8                    # биткоин хранится целым числом «сатоши»: 1 ₿ = 10**8 (без ошибок округления)
+BTC_WORDS = ("бит", "биток", "битки", "биткоин", "биткоины", "биткоина", "btc", "bitcoin")
+BTC_START_RATE = 1_000_000_000        # стартовый курс: 1 ₿ = 1000кк
+BTC_MAX_RATE = 10 ** 15               # выше курс поставить нельзя
+BTC_IMAGE = _find("bitcoin.jpg")      # картинка биткоина: положите файл рядом с ботом
 
 REP_COOLDOWN = 3600             # +реп / -реп: раз в час
 FREEZE_FOREVER = 10 * 365 * 86400   # «заморозить» без срока
@@ -269,7 +277,10 @@ COMMAND_CATEGORIES = [
     ]),
     ("💰 Экономика", [
         ("кошелёк", "баланс, опыт и уровень"),
-        ("передать СУММА (ответом)", f"перевод игроку: от {_n(TRANSFER_MIN)} до {_n(TRANSFER_MAX)} 💰, пауза {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)"),
+        ("передать СУММА (ответом)", f"перевод игроку: от {_n(TRANSFER_MIN)} до {_n(TRANSFER_MAX)} 💰, не больше {_n(TRANSFER_DAILY_LIMIT)} 💰 в сутки, пауза {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)"),
+        ("бит", "курс биткоина и ваш запас"),
+        ("купить бит [КОЛ-ВО]", "купить биткоин: «купить бит» — 1 ₿, «купить бит 0,5» — полбиткоина"),
+        ("продать бит [КОЛ-ВО | все]", "продать биткоин: «продать бит 0,5», «продать бит» — 1 ₿, «продать бит все» — весь запас"),
         ("купить вип", f"VIP на {VIP_DAYS} дней за {_n(VIP_PRICE)} 💰: бонус {_n(VIP_BONUS_MONEY)} 💰 в час, выигрыши x{VIP_WIN_BONUS}, префикс {VIP_PREFIX}"),
     ]),
     ("👤 Профиль и беседа", [
@@ -336,13 +347,15 @@ ID_RE = re.compile(r"(?:^|\s)(?:id)?(\d+)(?:\s|$)")
 BOT_MENTION_RE = re.compile(r"^\s*\[club\d+\|[^\]]*\]\s*,?\s*")
 ALL_IN_WORDS = ("все", "всё", "all", "вб", "ва-банк", "вабанк", "vb")   # «ставлю всё»
 AMOUNT_RE = re.compile(r"^(\d+(?:[.,]\d+)?)([кk]{0,4})$", re.IGNORECASE)
+OWNER_AMOUNT_RE = re.compile(r"^(\d+(?:[.,]\d+)?)([кk]{0,12})$", re.IGNORECASE)   # суммы владельца: хоть 10ккккккк
 TIME_UNITS = {"м": 60, "m": 60, "ч": 3600, "h": 3600, "д": 86400, "d": 86400}
 
 # Команды, которые срабатывают только если это всё сообщение целиком
 # (чтобы не реагировать на фразы вроде «топ идея» или «команды бота не работают»)
 BARE_COMMANDS = {"команды", "commands", "хелп", "help", "удалить", "delete",
                  "топ", "top", "бонус", "bonus", "кошелек", "wallet",
-                 "история", "history", "репорт", "report", "правила", "rules", "рыбалка", "fishing", "бэкап", "backup", "магазин", "shop", "гардероб", "wardrobe"}
+                 "история", "history", "репорт", "report", "правила", "rules", "рыбалка", "fishing", "бэкап", "backup", "магазин", "shop", "гардероб", "wardrobe",
+                 "бит", "биткоин", "btc", "bitcoin"}
 
 
 # ---------------------- Хранилища ----------------------
@@ -563,12 +576,19 @@ def _build_tables():
                 daily["day"] = r[1]
 
     def emeta_flatten():
-        return {("report_wait",): (_j(economy["report_wait"]),)} if economy.get("report_wait") else {}
+        rows = {}
+        if economy.get("report_wait"):
+            rows[("report_wait",)] = (_j(economy["report_wait"]),)
+        if economy.get("btc"):
+            rows[("btc",)] = (_j(economy["btc"]),)
+        return rows
 
     def emeta_load(rows):
         for r in rows:
             if r[0] == "report_wait":
                 economy["report_wait"] = json.loads(r[1])
+            elif r[0] == "btc":
+                economy["btc"] = json.loads(r[1])
 
     def inv_flatten():
         return {(int(u), i): (item,) for u, rec in economy.setdefault("users", {}).items()
@@ -689,6 +709,7 @@ def ensure_defaults():
         economy.setdefault(key, {})
     economy.setdefault("seq", {})
     economy.setdefault("media", {})
+    economy.setdefault("btc", {"rate": BTC_START_RATE, "prev": BTC_START_RATE, "t": 0})
     for key in ("duel", "report", "approval", "roulette"):
         economy["seq"].setdefault(key, 0)
     for key in ("mutes", "bans", "warns", "timeouts", "freezes", "grant_log"):
@@ -1012,12 +1033,12 @@ def fmt_duration(seconds):
     return " ".join(parts) or "0 сек"
 
 
-def parse_amount(text, balance=None):
+def parse_amount(text, balance=None, regex=None):
     """1кк = 1 000 000, 500к = 500 000, 1.5кк, 2500; «все»/«всё»/«вб» (ва-банк) = весь баланс."""
     t = text.strip().lower()
     if balance is not None and t in ALL_IN_WORDS:
         return balance
-    m = AMOUNT_RE.match(t)
+    m = (regex or AMOUNT_RE).match(t)
     if not m:
         return None
     value = int(Decimal(m.group(1).replace(",", ".")) * (1000 ** len(m.group(2))))
@@ -1423,7 +1444,152 @@ def cmd_wallet(msg, rest, slash):
         lines.append(f"До следующего уровня: {hi - user['exp']} exp (награда: +{fmt_num(LEVEL_UP_REWARD)} 💰)")
     if vip_active(user):
         lines.append(f"✨ VIP: до {fmt_time(user['vip_until'])}")
+    if user.get("btc", 0) > 0:
+        lines.append(f"₿ Биткоин: {fmt_btc(user['btc'])} (≈ {fmt_num(user['btc'] * economy['btc']['rate'] // BTC_UNIT)} 💰)")
     send(msg["peer_id"], "\n".join(lines))
+
+
+# ---------------------- Биткоин ----------------------
+# Курс задаёт владелец вручную (секретная команда в его личке, ни в каких справках её нет),
+# а игрокам это выглядит как самостоятельное движение рынка: стрелка и % к прошлому курсу.
+def fmt_btc(units):
+    """150000000 → «1,5»; 50000000 → «0,5»."""
+    return format((Decimal(units) / BTC_UNIT).normalize(), "f").replace(".", ",")
+
+
+def short_money(n):
+    """1000000000 → «1000кк», 450000000 → «450кк», 1500 → «1.500»."""
+    if n >= 10 ** 6 and n % 10 ** 6 == 0:
+        return f"{n // 10 ** 6}кк"
+    if n >= 1000 and n % 1000 == 0:
+        return f"{n // 1000}к"
+    return _n(n)
+
+
+def btc_pct(new, old):
+    return f"{abs(new - old) * 100 / old:.1f}".replace(".", ",")
+
+
+def btc_trend(b):
+    rate, prev = b["rate"], b.get("prev") or b["rate"]
+    if rate > prev:
+        return f"📈 +{btc_pct(rate, prev)}% (было {short_money(prev)})"
+    if rate < prev:
+        return f"📉 −{btc_pct(rate, prev)}% (было {short_money(prev)})"
+    return "➖ без изменений"
+
+
+def btc_attachment(peer_id):
+    return cached_photo(peer_id, BTC_IMAGE, "bitcoin") if os.path.exists(BTC_IMAGE) else None
+
+
+def cmd_btc(msg, rest, slash):
+    """«бит» / «курс бит»: курс биткоина, динамика и запас игрока (с картинкой)."""
+    peer_id = msg["peer_id"]
+    user = get_user(msg["from_id"])
+    b = economy["btc"]
+    own = user.get("btc", 0)
+    lines = ["₿ Биткоин", "",
+             f"Курс: 1 ₿ = {fmt_num(b['rate'])} 💰 ({short_money(b['rate'])})",
+             btc_trend(b)]
+    if b.get("t"):
+        lines.append(f"🕒 Обновлён: {fmt_time(b['t'])}")
+    lines += ["", f"У вас: {fmt_btc(own)} ₿" + (f" ≈ {fmt_num(own * b['rate'] // BTC_UNIT)} 💰" if own else ""),
+              f"Баланс: {fmt_num(user['money'])} 💰", "",
+              "Купить: «купить бит» (1 ₿) или «купить бит 0,5»",
+              "Продать: «продать бит» (1 ₿), «продать бит 0,5» или «продать бит все»"]
+    send(peer_id, "\n".join(lines), attachment=btc_attachment(peer_id))
+
+
+def parse_btc_qty(arg):
+    """«» → 1 ₿; «1», «0,5», «0.25» → сатоши. None — не число / ноль / больше 8 знаков после запятой."""
+    t = arg.strip().lower().replace(",", ".")
+    if not t:
+        return BTC_UNIT
+    if not re.fullmatch(r"\d{1,12}(?:\.\d{1,8})?", t):
+        return None
+    units = int(Decimal(t) * BTC_UNIT)
+    return units if units > 0 else None
+
+
+def btc_trade(msg, arg, sell):
+    """Покупка / продажа по текущему курсу. Без количества — 1 ₿; при продаже «все» — весь запас."""
+    peer_id, uid = msg["peer_id"], msg["from_id"]
+    user = get_user(uid)
+    rate = economy["btc"]["rate"]
+    word = arg.strip().lower().replace("ё", "е")
+    have = user.get("btc", 0)
+    if sell and word in ("все", "all"):
+        units = have
+        if units <= 0:
+            send(peer_id, "⚠ У вас нет биткоинов.")
+            return
+    else:
+        units = parse_btc_qty(word)
+        if units is None:
+            cmd = "продать" if sell else "купить"
+            send(peer_id, f"ℹ️ Укажите количество числом: «{cmd} бит 1» или «{cmd} бит 0,5» "
+                          f"(до 8 знаков после запятой){', «продать бит все» — весь запас' if sell else ''}.")
+            return
+    if sell:
+        if have < units:
+            send(peer_id, f"⚠ Недостаточно биткоинов. У вас: {fmt_btc(have)} ₿")
+            return
+        money = rate * units // BTC_UNIT
+        if money < 1:
+            send(peer_id, "⚠ Слишком маленькое количество.")
+            return
+        user["btc"] = have - units
+        user["money"] += money
+        head = f"🔴 Продано: {fmt_btc(units)} ₿ за {fmt_num(money)} 💰"
+    else:
+        money = -(-rate * units // BTC_UNIT)          # покупка округляется вверх, продажа — вниз
+        if user["money"] < money:
+            send(peer_id, f"⚠ Недостаточно денег: {fmt_btc(units)} ₿ стоит {fmt_num(money)} 💰, "
+                          f"у вас {fmt_num(user['money'])} 💰")
+            return
+        user["money"] -= money
+        user["btc"] = have + units
+        head = f"🟢 Куплено: {fmt_btc(units)} ₿ за {fmt_num(money)} 💰"
+    save_economy()
+    log_action(peer_id, uid, f"{'продал' if sell else 'купил'} {fmt_btc(units)} BTC за {money} (курс {rate})")
+    send(peer_id, f"{head}\nКурс: 1 ₿ = {short_money(rate)}\n"
+                  f"У вас: {fmt_btc(user.get('btc', 0))} ₿ · Баланс: {fmt_num(user['money'])} 💰")
+
+
+def cmd_sell(msg, rest, slash):
+    words = rest.strip().lower().replace("ё", "е").split()
+    if not words or words[0] not in BTC_WORDS:
+        if slash or not words:
+            send(msg["peer_id"], "ℹ️ Доступно: продать бит [КОЛИЧЕСТВО | все]")
+        return
+    btc_trade(msg, words[1] if len(words) > 1 else "", sell=True)
+
+
+def owner_btc_command(msg, text):
+    """СЕКРЕТ, только личка владельца: «курс бит 900кк» (или «курс бит из 1000кк до 900кк») ставит курс.
+    Нигде не упоминается в справках и не пишется в логи. True — сообщение обработано."""
+    words = text.lower().replace("ё", "е").split()
+    if len(words) < 2 or words[0] not in ("курс", "rate") or words[1] not in BTC_WORDS:
+        return False
+    peer_id = msg["peer_id"]
+    b = economy["btc"]
+    amounts = [a for a in (parse_amount(w, regex=OWNER_AMOUNT_RE) for w in words[2:]) if a]
+    if not amounts:
+        send(peer_id, f"₿ Сейчас: {short_money(b['rate'])}. Поставить: «курс бит 900кк»")
+        return True
+    new, old = amounts[-1], b["rate"]
+    if not 1 <= new <= BTC_MAX_RATE:
+        send(peer_id, f"⚠ Курс — от 1 до {fmt_num(BTC_MAX_RATE)} 💰")
+        return True
+    if new == old:
+        send(peer_id, f"ℹ️ Курс уже {short_money(old)}.")
+        return True
+    b["prev"], b["rate"], b["t"] = old, new, int(time.time())
+    save_economy()
+    send(peer_id, f"✅ Курс биткоина: {short_money(old)} → {short_money(new)} "
+                  f"({'+' if new > old else '−'}{btc_pct(new, old)}%)")
+    return True
 
 
 # ---------------------- Промокоды ----------------------
@@ -1967,9 +2133,13 @@ def cmd_buy(msg, rest, slash):
     peer_id = msg["peer_id"]
     uid = msg["from_id"]
     item = rest.strip().lower()
+    words = item.replace("ё", "е").split()
+    if words and words[0] in BTC_WORDS:
+        btc_trade(msg, words[1] if len(words) > 1 else "", sell=False)
+        return
     if item not in ("вип", "vip"):
         if slash or not item:
-            send(peer_id, "ℹ️ Доступно: купить вип")
+            send(peer_id, "ℹ️ Доступно: купить вип, купить бит")
         return
 
     user = get_user(uid)
@@ -2132,19 +2302,31 @@ def cmd_give_exp(msg, rest, slash):
         text += "\n\n" + level_note
     send(peer_id, text)
 # ---------------------- Передача денег ----------------------
+def _day_total(user, key_day, key_sum):
+    """Сколько игрок уже передал / получил переводами сегодня (счётчик сам обнуляется в полночь)."""
+    return int(user.get(key_sum, 0)) if user.get(key_day) == today_str() else 0
+
+
+def _add_day_total(user, key_day, key_sum, amount):
+    user[key_sum] = _day_total(user, key_day, key_sum) + amount
+    user[key_day] = today_str()
+
+
 def cmd_transfer(msg, rest, slash):
     peer_id = msg["peer_id"]
     uid = msg["from_id"]
     usage = (f"ℹ️ Использование: передать СУММА — ответом на сообщение участника\n"
              f"Или: передать ID СУММА\n"
              f"Сумма: от {fmt_num(TRANSFER_MIN)} до {fmt_num(TRANSFER_MAX)} 💰\n"
+             f"Всего за сутки можно передать: {fmt_num(TRANSFER_DAILY_LIMIT)} 💰\n"
              f"Пауза между переводами: {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)")
     target, tail = parse_target(msg, rest)
     if target is None:
         no_target(msg, rest, slash, usage)
         return
     parts = tail.split()
-    amount = parse_amount(parts[0]) if parts else None
+    is_owner = uid == OWNER_ID          # владелец переводит без лимитов суммы и без паузы
+    amount = parse_amount(parts[0], regex=OWNER_AMOUNT_RE if is_owner else None) if parts else None
     if amount is None:
         send(peer_id, usage)
         return
@@ -2154,13 +2336,13 @@ def cmd_transfer(msg, rest, slash):
     if target == uid:
         send(peer_id, "⛔ Нельзя передать деньги самому себе.")
         return
-    if not TRANSFER_MIN <= amount <= TRANSFER_MAX:
+    if not is_owner and not TRANSFER_MIN <= amount <= TRANSFER_MAX:
         send(peer_id, f"⚠ Сумма перевода: от {fmt_num(TRANSFER_MIN)} до {fmt_num(TRANSFER_MAX)} 💰")
         return
 
     sender = get_user(uid)
     now = time.time()
-    if not vip_active(sender):
+    if not is_owner and not vip_active(sender):
         left = sender.get("last_transfer", 0) + TRANSFER_COOLDOWN - now
         if left > 0:
             send(peer_id, f"⏳ Следующий перевод через {fmt_duration(left)}. "
@@ -2169,14 +2351,40 @@ def cmd_transfer(msg, rest, slash):
     if sender["money"] < amount:
         send(peer_id, f"⚠ Недостаточно денег. Ваш баланс: {fmt_num(sender['money'])} 💰")
         return
+
+    # --- защита экономики: суточные лимиты (владельца не касаются) ---
+    track_recv = not is_owner and target != OWNER_ID
+    if not is_owner and TRANSFER_DAILY_LIMIT > 0:
+        sent_today = _day_total(sender, "tr_day", "tr_sent")
+        if sent_today + amount > TRANSFER_DAILY_LIMIT:
+            can = max(0, TRANSFER_DAILY_LIMIT - sent_today)
+            send(peer_id, f"⛔ Суточный лимит переводов — {fmt_num(TRANSFER_DAILY_LIMIT)} 💰. "
+                          f"Сегодня вы уже передали {fmt_num(sent_today)} 💰, "
+                          f"можно ещё {fmt_num(can)} 💰. Лимит обнулится в полночь.")
+            return
+    if track_recv and TRANSFER_RECEIVE_LIMIT > 0:
+        got_today = _day_total(economy["users"].get(str(target), {}), "tr_rday", "tr_recv")
+        if got_today + amount > TRANSFER_RECEIVE_LIMIT:
+            can = max(0, TRANSFER_RECEIVE_LIMIT - got_today)
+            send(peer_id, "⛔ Этот игрок сегодня уже получил максимум переводов. " +
+                          (f"Ему можно передать ещё {fmt_num(can)} 💰." if can else "Попробуйте завтра."))
+            return
+
     receiver = get_user(target)
     sender["money"] -= amount
     receiver["money"] += amount
     sender["last_transfer"] = now
+    if not is_owner:
+        _add_day_total(sender, "tr_day", "tr_sent", amount)
+    if track_recv:
+        _add_day_total(receiver, "tr_rday", "tr_recv", amount)
     save_economy()
     log_action(peer_id, uid, f"передал {amount} → {target}")
     names = get_names([uid, target])
-    send(peer_id, f"💸 {mention(uid, names)} передал {mention(target, names)}: {fmt_num(amount)} 💰")
+    text = f"💸 {mention(uid, names)} передал {mention(target, names)}: {fmt_num(amount)} 💰"
+    if not is_owner and TRANSFER_DAILY_LIMIT > 0:
+        text += f"\nНа сегодня можно передать ещё: {fmt_num(max(0, TRANSFER_DAILY_LIMIT - _day_total(sender, 'tr_day', 'tr_sent')))} 💰"
+    send(peer_id, text)
 # ---------------------- Дуэль ----------------------
 def prune_duels():
     now = time.time()
@@ -2788,7 +2996,8 @@ def cmd_report(msg, rest, slash):
          "перейдите по ссылке и нажмите кнопку «Репорт» («для пользователей»):\n"
          f"https://vk.me/club{GROUP_ID}\n\n"
          "Затем опишите проблему одним сообщением — вам ответит следящий за репортами.\n"
-         "Если владельцу понравится идея, он выдаст вознаграждение.\n\n"
+         f"За репорт — {fmt_num(REPORT_DAILY_REWARD)} 💰 (раз в сутки). "
+         "Если владельцу понравится идея, он выдаст ещё больше.\n\n"
          "⚠ Бесполезный флуд — кик/бан.\n"
          f"Написать боту можно в течение {REPORT_WINDOW // 60} мин. "
          f"Между репортами пауза {REPORT_COOLDOWN} сек.")
@@ -3762,6 +3971,8 @@ def handle_dm(msg):
             send(peer_id, menu_text, menu_kb)
         return
     if uid == OWNER_ID:
+        if owner_btc_command(msg, text):            # секрет: курс биткоина
+            return
         if owner_report_command(msg, text):
             return
         wait = economy.get("report_wait")
@@ -6010,6 +6221,8 @@ register(("история", "history"), cmd_history)
 register(("бонус", "bonus"), cmd_bonus)
 register(("кошелек", "wallet"), cmd_wallet)   # «ё» заменяется на «е» до поиска
 register(("купить", "buy"), cmd_buy)
+register(("продать", "sell"), cmd_sell)
+register(("бит", "биткоин", "btc", "bitcoin"), cmd_btc)
 register(("передать", "transfer"), cmd_transfer)
 register(("мины", "mines"), cmd_mines)
 register(("дуэль", "duel"), cmd_duel)
@@ -6052,6 +6265,9 @@ TWO_WORD_COMMANDS = {
     ("мои", "аксессуары"): "мои_аксессуары",
     ("+", "реп"): "+реп",
     ("-", "реп"): "-реп",
+    ("курс", "бит"): "бит",
+    ("курс", "биткоин"): "биткоин",
+    ("курс", "btc"): "btc",
 }
 
 
@@ -6122,6 +6338,7 @@ def main():
     print(f"Магазин: персонажи {', '.join(SHOP_ITEMS)} (версия рисунков {ART_VERSION})")
     for _f in CHAR_FILES.values():
         print(f"  картинка {_f}: " + (f"найдена ({_find(_f)})" if os.path.exists(_find(_f)) else "НЕ НАЙДЕНА — положите рядом с ботом"))
+    print("  картинка bitcoin.jpg: " + (f"найдена ({BTC_IMAGE})" if os.path.exists(BTC_IMAGE) else "НЕ НАЙДЕНА — положите рядом с ботом"))
     print("Бот запущен")
     try:
         while True:
