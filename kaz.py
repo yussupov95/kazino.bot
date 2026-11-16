@@ -144,8 +144,8 @@ HISTORY_DAYS = 7                # сколько прошлых топов хр�
 HISTORY_PAGES = 2               # страницы «истории»: промокоды, прошлые топы
 TRANSFER_MIN = 500_000          # передать: от 500к
 TRANSFER_MAX = 50_000_000       # передать: до 50кк
-TRANSFER_DAILY_LIMIT = 50_000_000     # защита экономики: один игрок может ПЕРЕДАТЬ не больше этого за сутки (0 — выключить)
-TRANSFER_RECEIVE_LIMIT = 100_000_000  # ...а ПОЛУЧИТЬ переводами — не больше этого за сутки (от слива через «альтов»; 0 — выключить)
+TRANSFER_DAILY_LIMIT = 500_000_000    # защита экономики: один игрок может ПЕРЕДАТЬ не больше этого за сутки (0 — выключить)
+TRANSFER_RECEIVE_LIMIT = 500_000_000  # ...а ПОЛУЧИТЬ переводами — не больше этого за сутки (от слива через «альтов»; 0 — выключить)
                                       # Владелец не ограничен: ни его переводы, ни переводы ему не считаются
 MAX_GRANT = 10 ** 15            # максимум денег за одну выдачу («деньги»)
 MAX_EXP_GRANT = 100_000         # максимум опыта за одну выдачу («опыт»)
@@ -189,6 +189,7 @@ REF_REWARD = 10_000_000         # сколько получает приглас
 REF_PENDING_TTL = 7 * 86400     # перешёл по ссылке, но не зашёл в беседу — через 7 дней приглашение сгорает
 REF_CHAT_LINK = ""              # запасная ссылка-приглашение в беседу (https://vk.me/join/...), если бот не админ и сам её получить не может
 VIP_WIN_BONUS = 1.15            # VIP: коэффициенты выигрышей ×1.15 (2x → 2.3x)
+TRANSFER_ALERT_PAIR = 100_000_000   # если один игрок за сутки передал ОДНОМУ игроку больше этого — владельцу приходит уведомление в ЛС
 TRANSFER_COOLDOWN = 60          # пауза между переводами (у VIP паузы нет)
 REPORT_COOLDOWN = 60            # пауза между репортами
 DUEL_SHOT_SECONDS = 10          # время на выстрел в дуэли
@@ -299,7 +300,7 @@ ROULETTE_TITLES = {"red": "🔴 красное", "black": "⚫ чёрное", "e
                    "r1": "🎯 ряд 1", "r2": "🎯 ряд 2", "r3": "🎯 ряд 3"}
 ROULETTE_CACHE_DIR = _here("cache")   # сюда сохраняются картинки и гифки
 ROULETTE_TABLE_FILE = "roulette.png"  # картинка стола (лежит рядом с ботом): снизу полоса с цветом и числом, бот перерисовывает её под итог
-ROULETTE_IMG_V = 1              # поменяйте число, чтобы бот заново нарисовал и загрузил все картинки рулетки
+ROULETTE_IMG_V = 2              # поменяйте число, чтобы бот заново нарисовал и загрузил все картинки рулетки
 ROULETTE_IMG_WIDTH = 1280       # ширина готовой картинки (в VK уходит она, шаблон может быть больше)
 # Где на шаблоне полоса и число — в долях картинки (измерено по вашим скриншотам 2208×1242)
 ROULETTE_BAR = (877 / 1242, 1174 / 1242)            # полоса: от — до по высоте
@@ -3070,6 +3071,57 @@ def _add_day_total(user, key_day, key_sum, amount):
     user[key_day] = today_str()
 
 
+_GUARD_FILE = _here("transfer_guard.json")
+_pair_totals = {}     # {"день": {"отправитель>получатель": сумма}} — переживает перезапуск
+
+
+def _guard_load():
+    try:
+        with open(_GUARD_FILE, encoding="utf-8") as f:
+            _pair_totals.update(json.load(f))
+    except Exception:
+        pass
+
+
+def _guard_add(uid, target, amount):
+    """Прибавляет к сумме «uid → target» за сегодня, возвращает (было, стало)."""
+    day = today_str()
+    for k in [k for k in _pair_totals if k != day]:
+        del _pair_totals[k]
+    pairs = _pair_totals.setdefault(day, {})
+    key = f"{uid}>{target}"
+    before = pairs.get(key, 0)
+    pairs[key] = before + amount
+    try:
+        with open(_GUARD_FILE, "w", encoding="utf-8") as f:
+            json.dump(_pair_totals, f)
+    except Exception as e:
+        print(f"Не удалось сохранить журнал переводов: {err_text(e)}")
+    return before, before + amount
+
+
+def _notify_big_transfer(peer_id, uid, target, amount, pair_total):
+    """Уведомление владельцу в ЛС: игрок раздаёт много денег одному человеку."""
+    try:
+        names = get_names([uid, target])
+        s_user, r_user = get_user(uid), get_user(target)
+        text = (f"🚨 Подозрительные переводы\n"
+                f"Отправитель: {names.get(uid, '?')} (vk.com/id{uid}, ID {uid})\n"
+                f"Получатель: {names.get(target, '?')} (vk.com/id{target}, ID {target})\n"
+                f"Этот перевод: {fmt_num(amount)} 💰\n"
+                f"Всего ему за сегодня от этого игрока: {fmt_num(pair_total)} 💰\n"
+                f"Баланс отправителя: {fmt_num(s_user['money'])} 💰\n"
+                f"Баланс получателя: {fmt_num(r_user['money'])} 💰\n"
+                f"Беседа: peer_id {peer_id}\n"
+                f"Время: {time.strftime('%d.%m.%Y %H:%M:%S')}")
+        send(OWNER_ID, text)
+    except Exception as e:
+        print(f"Не удалось уведомить владельца о переводе: {err_text(e)}")
+
+
+_guard_load()
+
+
 def cmd_transfer(msg, rest, slash):
     peer_id = msg["peer_id"]
     uid = msg["from_id"]
@@ -3137,6 +3189,10 @@ def cmd_transfer(msg, rest, slash):
     if track_recv:
         _add_day_total(receiver, "tr_rday", "tr_recv", amount)
     save_economy()
+    if not is_owner:
+        _before, _after = _guard_add(uid, target, amount)
+        if _after > TRANSFER_ALERT_PAIR:
+            _notify_big_transfer(peer_id, uid, target, amount, _after)
     log_action(peer_id, uid, f"передал {amount} → {target}")
     names = get_names([uid, target])
     text = f"💸 {mention(uid, names)} передал {mention(target, names)}: {fmt_num(amount)} 💰"
@@ -5225,15 +5281,50 @@ def check_duel_timers():
 _wheel_cache = {}
 
 
+_FONT_DIRS = ("/usr/share/fonts", "/usr/local/share/fonts", "C:/Windows/Fonts", "/Library/Fonts", "/System/Library/Fonts")
+_FONT_CACHE = {}
+
+
+def _find_font_file(names):
+    """Ищет файл шрифта по имени в системных папках (на Linux-хостингах arial.ttf нет)."""
+    key = tuple(names)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
+    found = None
+    for folder in (BASE_DIR,) + _FONT_DIRS:
+        for root, _dirs, files in os.walk(folder):
+            low = {f.lower(): f for f in files}
+            for name in names:
+                if name.lower() in low:
+                    found = os.path.join(root, low[name.lower()])
+                    break
+            if found:
+                break
+        if found:
+            break
+    _FONT_CACHE[key] = found
+    return found
+
+
 def _font(size):
     from PIL import ImageFont
-    for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf",
-                 "LiberationSans-Bold.ttf", "FreeSansBold.ttf"):
+    names = ("arialbd.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "FreeSansBold.ttf",
+             "Roboto-Bold.ttf", "OpenSans-Bold.ttf", "Inter-Bold.otf", "Poppins-Bold.ttf", "arial.ttf", "DejaVuSans.ttf")
+    for name in names:
         try:
             return ImageFont.truetype(name, size)
         except Exception:
             continue
-    return ImageFont.load_default()
+    path = _find_font_file(names)
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default(size)     # Pillow ≥ 10.1: масштабируемый шрифт
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def build_wheel_base():
@@ -5361,14 +5452,19 @@ def make_roulette_image(n):
         else:
             color = ROULETTE_BAR_COLORS["red" if n in ROULETTE_RED else "black"]
         d.rectangle((0, int(H * ROULETTE_BAR[0]), W, int(H * ROULETTE_BAR[1]) - 1), fill=color)
-        # размер шрифта подбираем так, чтобы высота цифры была как на шаблоне, какой бы шрифт ни нашёлся
-        probe = _font_regular(200).getbbox("0")
-        size = max(10, int(200 * (H * ROULETTE_NUM_HEIGHT) / (probe[3] - probe[1])))
-        font = _font_regular(size)
+        # число крупное, жирное, с обводкой — читается на любом цвете полосы
+        bar_h = H * (ROULETTE_BAR[1] - ROULETTE_BAR[0])
         text = "?" if n is None else str(n)
-        box = d.textbbox((0, 0), text, font=font)
-        cx, cy = W * ROULETTE_NUM_CENTER[0], H * ROULETTE_NUM_CENTER[1]
-        d.text((cx - (box[0] + box[2]) / 2, cy - (box[1] + box[3]) / 2), text, font=font, fill=(255, 255, 255))
+        size = max(20, int(bar_h * 0.82))
+        font = _font(size)
+        box = d.textbbox((0, 0), text, font=font, stroke_width=max(2, size // 25))
+        while (box[3] - box[1]) > bar_h * 0.9 and size > 20:      # не вылезаем за полосу
+            size = int(size * 0.92)
+            font = _font(size)
+            box = d.textbbox((0, 0), text, font=font, stroke_width=max(2, size // 25))
+        cx, cy = W * ROULETTE_NUM_CENTER[0], H * (ROULETTE_BAR[0] + ROULETTE_BAR[1]) / 2
+        d.text((cx - (box[0] + box[2]) / 2, cy - (box[1] + box[3]) / 2), text, font=font, fill=(255, 255, 255),
+               stroke_width=max(2, size // 25), stroke_fill=(0, 0, 0))
         if W > ROULETTE_IMG_WIDTH:
             img = img.resize((ROULETTE_IMG_WIDTH, round(H * ROULETTE_IMG_WIDTH / W)), Image.LANCZOS)
         img.save(path, quality=92)
@@ -5404,15 +5500,62 @@ def roulette_photo(n):
     return att
 
 
+def make_roulette_card(n):
+    """Запасная статичная картинка (без гифки), если нет roulette.png: цветная плашка с крупным числом."""
+    name = "q" if n is None else str(n)
+    path = os.path.join(ROULETTE_CACHE_DIR, f"card_{name}_v{ROULETTE_IMG_V}.jpg")
+    if os.path.exists(path):
+        return path
+    try:
+        from PIL import Image, ImageDraw
+        os.makedirs(ROULETTE_CACHE_DIR, exist_ok=True)
+        W, H = 1000, 560
+        color = (ROULETTE_BAR_COLORS["wait"] if n is None else ROULETTE_BAR_COLORS["green"] if n == 0
+                 else ROULETTE_BAR_COLORS["red" if n in ROULETTE_RED else "black"])
+        img = Image.new("RGB", (W, H), (14, 0, 8))
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle((60, 60, W - 60, H - 60), radius=50, fill=color, outline=(255, 215, 90), width=10)
+        text = "?" if n is None else str(n)
+        font = _font(330)
+        box = d.textbbox((0, 0), text, font=font, stroke_width=10)
+        d.text((W / 2 - (box[0] + box[2]) / 2, H / 2 - (box[1] + box[3]) / 2), text, font=font,
+               fill=(255, 255, 255), stroke_width=10, stroke_fill=(0, 0, 0))
+        img.save(path, quality=92)
+        return path
+    except Exception as e:
+        print(f"Не удалось нарисовать карточку рулетки: {err_text(e)}")
+        return None
+
+
+def roulette_card_photo(n):
+    key = f"roulette_card_v{ROULETTE_IMG_V}_{'q' if n is None else n}"
+    with LOCK:
+        att = economy["media"].get(key)
+    if att:
+        return att
+    path = make_roulette_card(n)
+    if not path:
+        return None
+    try:
+        photo = vk_upload.photo_messages(path)[0]
+        att = f"photo{photo['owner_id']}_{photo['id']}"
+    except Exception as e:
+        print(f"Не удалось загрузить картинку рулетки: {err_text(e)}")
+        return None
+    with LOCK:
+        economy["media"][key] = att
+        save_economy()
+    return att
+
+
 def roulette_images(peer_id, n):
-    """(картинка, пока рулетка крутится; картинка итога). Нет roulette.png — запасная гифка с колесом."""
+    """(картинка, пока рулетка крутится; картинка итога). Гифок больше нет: стол из roulette.png,
+    а если файла нет — простая цветная карточка с числом."""
     if os.path.exists(_find(ROULETTE_TABLE_FILE)):
         waiting, result = roulette_photo(None), roulette_photo(n)
         if waiting and result:
             return waiting, result
-    path = make_roulette_gif(n)
-    gif = upload_gif(peer_id, path) if path else None
-    return gif, gif
+    return roulette_card_photo(None), roulette_card_photo(n)
 
 
 def upload_gif(peer_id, path):
@@ -7592,6 +7735,9 @@ TWO_WORD_COMMANDS = {
 }
 
 
+MASS_MENTION_RE = re.compile(r"(?<![\w@])[@*](all|everyone|online|here|все|всем|онлайн|здесь)(?![\w])", re.IGNORECASE)
+
+
 def handle_message(msg):
     rollover_if_needed()
     peer_id = msg["peer_id"]
@@ -7601,6 +7747,20 @@ def handle_message(msg):
     action = msg.get("action")
     if action:
         handle_action(msg, action)
+        return
+
+    # Запрет на @all / @everyone / @online / @here: сообщение удаляется, автор исключается (владелец не затрагивается)
+    if uid > 0 and uid != OWNER_ID and MASS_MENTION_RE.search(msg.get("text", "") or ""):
+        delete_message(peer_id, msg["conversation_message_id"])
+        log_message(msg, "удалено: @all")
+        try:
+            kick_from_chat(peer_id, uid)
+            names = get_names([uid])
+            send(peer_id, f"🚫 {mention(uid, names)} исключён из беседы: массовое упоминание (@all) запрещено.")
+            log_action(peer_id, uid, "кик за @all")
+        except Exception as e:
+            print(f"Не удалось исключить за @all {uid}: {err_text(e)}")
+            send(peer_id, "⚠ Обнаружен @all, но исключить не удалось — у бота должны быть права администратора беседы.")
         return
 
     # Мут и режим тишины: сообщения удаляются, команды не работают
