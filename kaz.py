@@ -185,7 +185,9 @@ AUCTION_MAX_LOTS = 10           # сколько лотов может держ�
 AUCTION_PAGE = 5                # лотов на странице списка (кнопок «Купить» — столько же)
 
 # --- Рефералка ---
-REF_REWARD = 10_000_000         # сколько получает пригласивший, когда приглашённый зашёл в беседу (10кк)
+REF_REWARD = 10_000_000         # деньги пригласившему, когда приглашённый зашёл в беседу (10кк)
+REF_INVITEE_REWARD = 10_000_000 # деньги тому, кто зашёл по ссылке (10кк)
+REF_EXP = 3                     # опыт каждому: и пригласившему, и тому, кто зашёл
 REF_PENDING_TTL = 7 * 86400     # перешёл по ссылке, но не зашёл в беседу — через 7 дней приглашение сгорает
 REF_CHAT_LINK = ""              # запасная ссылка-приглашение в беседу (https://vk.me/join/...), если бот не админ и сам её получить не может
 VIP_WIN_BONUS = 1.15            # VIP: коэффициенты выигрышей ×1.15 (2x → 2.3x)
@@ -200,8 +202,10 @@ MINES_VERSION = 2               # версия поля (игры старых �
 DONATE_CARD = "2202208204178454"             # карта для переводов
 DONATE_CARD_BANK = "Сбер"
 DONATE_QR_FILE = _find("donate_qr.jpeg")     # ваш QR-код Сбера: положите картинку рядом с ботом
+HEAL_DAYS = 7                   # сколько дней действует зелье лечения
 DONATE_ITEMS = {
     "vamp": {"title": "🧛 Должность «Вампир»", "price": 299, "old_price": 499},   # цена в рублях; old_price — зачёркнутая цена (скидка)
+    "heal": {"title": "🧪 Зелье лечения", "price": 100, "days": HEAL_DAYS},
     "virt": {"title": "💎 Игровые вирты 100кк", "price": 49, "money": 100_000_000},
     "pref": {"title": "🏷 Префикс на любой вкус", "price": 49},
 }
@@ -219,6 +223,11 @@ VAMPIRE_PERCENT = 10            # сколько процентов баланс
 VAMPIRE_TOP_PERCENT = 0.5       # сколько процентов забирает Вампир у игрока на 1 месте в топе по балансу
 VAMPIRE_COOLDOWN = 3600         # кд: раз в час
 VAMPIRE_IMMUNE = set()          # ID, которых кусать нельзя, например {OWNER_ID}
+
+
+def heal_left(user):
+    """Сколько секунд ещё действует зелье лечения (0 — не действует)."""
+    return max(0.0, float(user.get("heal_until", 0) or 0) - time.time())
 
 
 def fmt_pct(value):
@@ -388,7 +397,7 @@ COMMAND_CATEGORIES = [
     ("🎁 Бонусы и промокоды", [
         ("бонус", f"раз в час: {_n(BONUS_MONEY)} 💰 и {BONUS_EXP} exp (VIP — {_n(VIP_BONUS_MONEY)} 💰)"),
         ("промокод НАЗВАНИЕ", "активировать промокод (можно написать просто НАЗВАНИЕ, без слова «промокод»)"),
-        ("реф / рефералка", f"ваша личная ссылка: за каждого, кто перешёл по ней и зашёл в беседу, вы получаете {_n(REF_REWARD)} 💰"),
+        ("реф / рефералка", f"ваша личная ссылка: когда друг перешёл по ней и зашёл в беседу, вы оба получаете {_n(REF_REWARD)} 💰 и {REF_EXP} exp (друг должен быть новичком беседы)"),
     ]),
     ("💰 Экономика", [
         ("кошелёк", "баланс, опыт и уровень"),
@@ -418,6 +427,7 @@ COMMAND_CATEGORIES = [
     ]),
     ("💎 Донат", [
         ("донат", "привилегии с ценами и кнопки покупки: реквизиты приходят в личные сообщения (оплата через Сбер: QR или карта, награда — после проверки)"),
+        ("донат зелье", f"зелье лечения на {HEAL_DAYS} дней за {DONATE_ITEMS['heal']['price']} ₽: защищает от укусов Вампиров"),
         ("донат префикс ТЕКСТ", f"заказать свой префикс до {DONATE_PREFIX_MAX} символов ({DONATE_ITEMS['pref']['price']} ₽). Пример: донат префикс Король чата"),
         ("укусить (ответом / @имя)", f"только для Вампира ({DONATE_ITEMS['vamp']['price']} ₽): раз в час укусить игрока и забрать {fmt_pct(VAMPIRE_PERCENT)}% его денег. Если игрок на 1 месте в топе по балансу — только {fmt_pct(VAMPIRE_TOP_PERCENT)}%. Вампир может просто написать @упоминание"),
     ]),
@@ -1493,6 +1503,8 @@ def build_profile(peer_id, uid):
         extra.append(f"✨ VIP до {fmt_time(user['vip_until'])}")
     if user.get("vampire"):
         extra.append(f"🧛 Должность: {VAMPIRE_TITLE}")
+    if heal_left(user) > 0:
+        extra.append(f"🧪 Зелье лечения до {fmt_time(user['heal_until'])}")
     chat_st = stats.get(str(peer_id), {}).get(str(uid))
     if chat_st:
         extra.append(f"💬 Сообщений в чате: {fmt_num(chat_st['n'])}")
@@ -2287,12 +2299,15 @@ def cmd_ref(msg, rest, slash):
     get_user(uid)               # игрок должен быть в базе — иначе ссылка не сработает
     save_economy()
     count, earned = ref_stats(uid)
+    exp_earned = sum(int(r.get("exp_amount") or 0) for r in economy["refs"].values() if r.get("ref") == uid and r.get("paid"))
     send(peer_id, f"🔗 Ваша реферальная ссылка:\n{ref_link(uid, peer_id)}\n\n"
                   f"Отправьте её другу: он перейдёт по ссылке, нажмёт «Начать», получит приглашение в беседу — "
-                  f"и когда зайдёт, вы получите {fmt_num(REF_REWARD)} 💰.\n"
-                  f"За каждого нового человека — один раз.\n\n"
+                  f"и когда зайдёт, вы ОБА получите {fmt_num(REF_REWARD)} 💰 и {REF_EXP} exp.\n"
+                  f"Друг должен быть новичком беседы (раньше в ней не писал). За каждого нового человека — один раз.\n"
+                  f"Если после перехода бот не ответил — пусть друг отправит ему в личку эту ссылку сообщением.\n\n"
                   f"👥 Приглашено: {count}\n"
-                  f"💰 Заработано: {fmt_num(earned)}")
+                  f"💰 Заработано: {fmt_num(earned)}\n"
+                  f"⭐ Опыта: {fmt_num(exp_earned)}")
 
 
 def get_chat_invite_link(chat_peer):
@@ -2326,6 +2341,10 @@ def handle_ref_start(msg):
     if rec and rec.get("paid"):
         send(peer_id, "ℹ️ Вы уже приходили по приглашению — повторно награда за вас не выдаётся.")
         return True
+    if not ref_is_newcomer(chat_peer, uid, rec):
+        print(f"[реф] {uid} уже писал в беседе {chat_peer} — награда за приглашение не положена")
+        send(peer_id, "ℹ️ Вы уже есть в этой беседе (писали в ней раньше) — награда за приглашение выдаётся только новичкам.")
+        return True
     fresh = rec and not rec.get("paid") and time.time() - rec.get("t", 0) < REF_PENDING_TTL
     if not fresh:       # первый пригласивший остаётся за человеком, пока приглашение не сгорело
         economy["refs"][str(uid)] = {"ref": referrer, "peer": chat_peer, "t": time.time(), "paid": False}
@@ -2337,15 +2356,24 @@ def handle_ref_start(msg):
     lines = [f"👋 Вас пригласил {mention(rec['ref'], names)}!", ""]
     if link:
         lines += [f"Заходите в беседу: {link}",
-                  f"Когда вы зайдёте, пригласивший получит {fmt_num(REF_REWARD)} 💰."]
+                  f"Когда вы зайдёте, вы оба получите {fmt_num(REF_REWARD)} 💰 и {REF_EXP} exp: и вы, и пригласивший."]
     else:
         lines += ["Беседу не удалось открыть автоматически — попросите пригласившего прислать ссылку-приглашение."]
     send(peer_id, "\n".join(lines))
     return True
 
 
+def ref_is_newcomer(chat_peer, uid, rec=None):
+    """Новичок беседы: в этой беседе ещё не писал (или первое сообщение было уже ПОСЛЕ перехода по ссылке)."""
+    st = stats.get(str(chat_peer), {}).get(str(uid))
+    if not st:
+        return True
+    return bool(rec) and st.get("first", 0) >= rec.get("t", 0) - 60
+
+
 def check_referral_join(peer_id, uid):
-    """Человек зашёл в беседу: если он пришёл по реф-ссылке именно в эту беседу — платим пригласившему."""
+    """Человек зашёл в беседу (или написал в ней первое сообщение): если он пришёл по реф-ссылке именно в эту
+    беседу — награда и пригласившему, и ему самому (деньги + опыт)."""
     rec = economy["refs"].get(str(uid))
     if not rec or rec.get("paid") or rec.get("peer") != peer_id:
         return
@@ -2354,18 +2382,29 @@ def check_referral_join(peer_id, uid):
         save_economy()
         return
     referrer = rec["ref"]
-    if referrer == uid or str(uid) in stats.get(str(peer_id), {}):   # уже писал в этой беседе — не новичок
+    if referrer == uid:
+        return
+    if not ref_is_newcomer(peer_id, uid, rec):   # уже писал в этой беседе до перехода по ссылке — не новичок
+        print(f"[реф] {uid} уже писал в беседе {peer_id} — награда за приглашение не выдана")
         return
     get_user(referrer)["money"] += REF_REWARD
+    get_user(uid)["money"] += REF_INVITEE_REWARD
+    level_notes = [add_exp(referrer, REF_EXP), add_exp(uid, REF_EXP)]
     rec["paid"] = True
     rec["paid_t"] = time.time()
     rec["amount"] = REF_REWARD
+    rec["exp_amount"] = REF_EXP
     save_economy()
-    log_action(peer_id, referrer, f"реферал: +{REF_REWARD} за приглашение {uid}")
+    log_action(peer_id, referrer, f"реферал: +{REF_REWARD} и {REF_EXP} exp за приглашение {uid} (ему тоже +{REF_INVITEE_REWARD}, {REF_EXP} exp)")
     names = get_names([uid, referrer])
+    lines = [f"🎉 {mention(uid, names)} зашёл(ла) в беседу по приглашению {mention(referrer, names)}!",
+             f"+{fmt_num(REF_REWARD)} 💰 и +{REF_EXP} exp — {mention(referrer, names)} (пригласил)",
+             f"+{fmt_num(REF_INVITEE_REWARD)} 💰 и +{REF_EXP} exp — {mention(uid, names)} (зашёл)"]
+    for who, note in zip((referrer, uid), level_notes):
+        if note:
+            lines += ["", f"{mention(who, names)}: {note}"]
     try:
-        send(peer_id, f"🎉 {mention(uid, names)} зашёл(ла) в беседу по приглашению {mention(referrer, names)}!\n"
-                      f"+{fmt_num(REF_REWARD)} 💰 пригласившему.")
+        send(peer_id, "\n".join(lines))
     except Exception as e:
         print(f"Не удалось отправить сообщение о реферале: {err_text(e)}")
 
@@ -2745,7 +2784,7 @@ def cmd_unban(msg, rest, slash):
 
 def handle_action(msg, action):
     """Если забаненный вернулся в беседу (пригласили или по ссылке) — исключаем снова."""
-    if action.get("type") not in ("chat_invite_user", "chat_invite_user_by_link"):
+    if action.get("type") not in ("chat_invite_user", "chat_invite_user_by_link", "chat_invite_user_by_message_request"):
         return
     peer_id = msg["peer_id"]
     uid = action.get("member_id") or msg["from_id"]
@@ -4819,6 +4858,11 @@ def handle_dm(msg):
     if uid <= 0:
         return
     peer_id = msg["peer_id"]
+    if not msg.get("ref"):                            # VK не передал ref (диалог уже был) — берём код из текста
+        raw = (msg.get("text") or "").strip()
+        code = re.search(r"[?&]ref=(r\d+_\d+)", raw) or re.fullmatch(r"(r\d+_\d+)", raw)
+        if code:
+            msg = dict(msg, ref=code.group(1))
     if msg.get("ref") and handle_ref_start(msg):      # перешли по реф-ссылке
         return
     text = (msg.get("text") or "").strip()
@@ -7775,7 +7819,7 @@ def donate_card(order, text, kb, attachment=None):
     save_economy()
 
 
-DONATE_KEYS = ("vamp", "virt", "pref")      # порядок привилегий в «донат»
+DONATE_KEYS = ("vamp", "heal", "virt", "pref")      # порядок привилегий в «донат»
 
 
 def strike(text):
@@ -7803,7 +7847,18 @@ def donate_details(key):
             f"• обычного игрока кусает на {fmt_pct(VAMPIRE_PERCENT)}% его баланса",
             f"• игрока на 1 месте в топе по балансу — только на {fmt_pct(VAMPIRE_TOP_PERCENT)}%",
             f"• кд: раз в {VAMPIRE_COOLDOWN // 3600} ч.",
+            "• нельзя кусать других Вампиров",
+            "• не сработает на игрока с зельем лечения",
             "• покупается один раз, без срока действия",
+        ]
+    if key == "heal":
+        return [
+            "Что это: зелье, которое лечит от укусов Вампиров.",
+            "Для чего: защитить свои деньги — пока зелье действует, Вампир не сможет вас укусить.",
+            "",
+            f"• действует {DONATE_ITEMS['heal']['days']} дней с момента покупки",
+            "• после окончания можно купить снова",
+            "• Вампирам не нужно: другие Вампиры их и так не кусают",
         ]
     if key == "virt":
         return [
@@ -7892,6 +7947,11 @@ def donate_create(uid, item_key, data="", chat_peer=None):
     user = get_user(uid)
     if item_key == "vamp" and user.get("vampire"):
         return f"🧛 Вы уже {VAMPIRE_TITLE}."
+    if item_key == "heal":
+        if user.get("vampire"):
+            return f"🧛 {VAMPIRE_TITLE}ов другие вампиры не кусают — зелье вам не нужно."
+        if heal_left(user) > 0:
+            return f"🧪 Зелье уже действует, осталось {fmt_duration(heal_left(user))}. Купить новое можно после окончания."
     now = time.time()
     wait = user.get("last_order", 0) + DONATE_CREATE_COOLDOWN - now
     if wait > 0:
@@ -8028,6 +8088,10 @@ def donate_finish(order):
         reward = (f"🧛 Вы стали {VAMPIRE_TITLE}! Раз в {VAMPIRE_COOLDOWN // 3600} ч. можно укусить игрока и забрать {fmt_pct(VAMPIRE_PERCENT)}% его денег "
                   f"(лидера топа по балансу — {fmt_pct(VAMPIRE_TOP_PERCENT)}%).\n"
                   "Команда: «укусить» (ответом на сообщение игрока) или «укусить @имя».")
+    elif key == "heal":
+        user["heal_until"] = max(time.time(), float(user.get("heal_until", 0) or 0)) + HEAL_DAYS * 86400
+        reward = (f"🧪 Зелье лечения выпито! {HEAL_DAYS} дней Вампиры не смогут вас укусить.\n"
+                  f"Действует до {fmt_time(user['heal_until'])}.")
     elif key == "virt":
         user["money"] += DONATE_ITEMS["virt"]["money"]
         reward = f"💎 +{fmt_num(DONATE_ITEMS['virt']['money'])} 💰. Баланс: {fmt_num(user['money'])} 💰"
@@ -8117,7 +8181,7 @@ def donate_action(ev, p):
                 print(f"Не удалось написать игроку {uid} в ЛС: {err_text(e)}")
                 return donate_dm_closed(peer_id, uid)
             return "📩 Инструкция в личных сообщениях."
-        if p.get("k") not in ("vamp", "virt"):
+        if p.get("k") not in ("vamp", "heal", "virt"):
             return "Кнопка устарела. Напишите «донат» заново."
         return donate_create(uid, p["k"], chat_peer=peer_id if peer_id >= CHAT_OFFSET else None)
     o = find_order(p.get("id"))                     # кнопки игрока под заказом
@@ -8251,8 +8315,9 @@ def cmd_donate(msg, rest, slash):
         new, err = donate_prefix_check(tail)
         send(peer_id, err or donate_create(uid, "pref", new, chat_peer))
         return
-    if word in ("вампир", "vampire", "вирты", "virt"):
-        send(peer_id, donate_create(uid, "vamp" if word in ("вампир", "vampire") else "virt", chat_peer=chat_peer))
+    donate_words = {"вампир": "vamp", "vampire": "vamp", "зелье": "heal", "heal": "heal", "вирты": "virt", "virt": "virt"}
+    if word in donate_words:
+        send(peer_id, donate_create(uid, donate_words[word], chat_peer=chat_peer))
         return
     if word and not slash:      # «донат когда будет» и т.п. — обычный разговор, не реагируем
         return
@@ -8303,6 +8368,12 @@ def vampire_steal(msg, victim, quiet=False):
     target = economy["users"].get(str(victim))
     if not target or str(victim) not in stats.get(str(peer_id), {}):
         say("🧛 Не нашёл такого игрока в этой беседе.")
+        return
+    if target.get("vampire"):
+        say("🧛 Нельзя кусать других Вампиров.")
+        return
+    if heal_left(target) > 0:
+        say(f"🧪 У этого игрока зелье лечения — укус не удался (действует ещё {fmt_duration(heal_left(target))}).")
         return
     is_leader = balance_leader(peer_id) == str(victim)       # 1 место в топе по балансу
     percent = VAMPIRE_TOP_PERCENT if is_leader else VAMPIRE_PERCENT
@@ -8465,6 +8536,9 @@ def handle_message(msg):
         log_message(msg, "удалено: мут" if muted else "удалено: тишина")
         delete_message(peer_id, msg["conversation_message_id"])
         return
+
+    if uid > 0 and str(uid) in economy["refs"]:
+        check_referral_join(peer_id, uid)       # реф-новичок написал первое сообщение — платим, даже если вход не заметили
 
     log_message(msg)
     count_message(msg)
