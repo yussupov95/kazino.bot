@@ -20,9 +20,40 @@ from config import (
 from database import economy, get_level, get_prefix, save_economy
 
 
+# ---------- Защита от «Flood control» (ошибка VK №9) ----------
+# Получив эту ошибку, бот на несколько секунд перестаёт обращаться к VK по этой беседе: повторы раз в секунду
+# только продлевали блокировку. Пауза растёт при повторных ошибках (4 → 8 → 16 → максимум 30 сек.).
+_flood_until = {}
+_flood_step = {}
+FLOOD_PAUSE = 4
+FLOOD_PAUSE_MAX = 30
+
+def _flood_check(peer_id):
+    if time.time() < _flood_until.get(peer_id, 0):
+        raise RuntimeError("VK flood control: пауза для этой беседы")
+
+def _flood_note(peer_id, e):
+    if getattr(e, "code", None) == 9:
+        step = min(FLOOD_PAUSE_MAX, _flood_step.get(peer_id, FLOOD_PAUSE // 2) * 2)
+        _flood_step[peer_id] = step
+        _flood_until[peer_id] = time.time() + step
+
+def _flood_ok(peer_id):
+    _flood_step.pop(peer_id, None)
+
+def _guarded(peer_id, call):
+    _flood_check(peer_id)
+    try:
+        res = call()
+    except Exception as e:
+        _flood_note(peer_id, e)
+        raise
+    _flood_ok(peer_id)
+    return res
+
 # ---------- Вспомогательное ----------
 def send(peer_id, text, keyboard=None, attachment=None):
-    vk.messages.send(
+    _guarded(peer_id, lambda: vk.messages.send(
         peer_id=peer_id,
         message=text,
         keyboard=keyboard,
@@ -30,7 +61,7 @@ def send(peer_id, text, keyboard=None, attachment=None):
         random_id=get_random_id(),
         disable_mentions=1,     # упоминания не пингуют людей
         dont_parse_links=1,     # без превью ссылок
-    )
+    ))
 
 def edit_message(peer_id, cmid, text, keyboard=None, attachment=None):
     """Заменяет текст и клавиатуру сообщения бота. Без keyboard — кнопки убираются."""
@@ -43,14 +74,17 @@ def edit_message(peer_id, cmid, text, keyboard=None, attachment=None):
     }
     if attachment:
         params["attachment"] = attachment
+    _flood_check(peer_id)
     if keyboard is not None:
-        vk.messages.edit(keyboard=keyboard, **params)
+        _guarded(peer_id, lambda: vk.messages.edit(keyboard=keyboard, **params))
         return
     try:
-        vk.messages.edit(keyboard=VkKeyboard.get_empty_keyboard(), **params)
+        _guarded(peer_id, lambda: vk.messages.edit(keyboard=VkKeyboard.get_empty_keyboard(), **params))
     except Exception as e:
         print(f"Не удалось убрать клавиатуру: {err_text(e)}")
-        vk.messages.edit(**params)
+        if getattr(e, "code", None) == 9:       # при флуде второй запрос бессмыслен
+            raise
+        _guarded(peer_id, lambda: vk.messages.edit(**params))
 
 def delete_message(peer_id, cmid):
     try:
@@ -327,7 +361,7 @@ def active_dialog_of(uid):
 LOCK = threading.RLock()
 def send_get_cmid(peer_id, text, keyboard=None, attachment=None):
     """Отправляет сообщение и возвращает его conversation_message_id (чтобы потом редактировать)."""
-    res = vk.messages.send(
+    res = _guarded(peer_id, lambda: vk.messages.send(
         peer_ids=peer_id,
         message=text,
         keyboard=keyboard,
@@ -335,7 +369,7 @@ def send_get_cmid(peer_id, text, keyboard=None, attachment=None):
         random_id=get_random_id(),
         disable_mentions=1,
         dont_parse_links=1,
-    )
+    ))
     try:
         return res[0].get("conversation_message_id")
     except Exception:
