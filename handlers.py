@@ -3,6 +3,7 @@
 import json
 import re
 
+from antiabuse import freeze_reason_text
 from auction import auction_action, cmd_auction
 from backup import cmd_backup
 from bank import cmd_bank
@@ -14,6 +15,7 @@ from config import (
 )
 from contest import contest_try_answer
 from crash import cmd_crash
+from debt import cmd_debt_give, cmd_debt_return, cmd_debts, debt_action
 from database import count_message, economy, freeze_left, get_level, mute_left
 from donate import build_donate_page, cmd_donate, donate_action, DONATE_KEYS
 from duel import cmd_duel, duel_action
@@ -23,6 +25,7 @@ from extras import (
 )
 from fishing import cmd_fishing, fish_action
 from gban import cmd_deputy, cmd_gban, cmd_ungban, gban_guard
+from gldeputy import cmd_fine, cmd_gl_deputy, cmd_norm_minus, cmd_norm_plus, cmd_renorm
 from helpers import (
     answer_event, delete_message, drone_command, drone_guard, edit_message, freeze_text,
     get_names, HANDLERS, kick_from_chat, mention, PAGER_WORDS, register, send,
@@ -87,7 +90,7 @@ def handle_callback(ev):
 
     actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action,
                "roul": roulette_action, "fish": fish_action, "shop": shop_action, "biz": biz_action,
-               "auc": auction_action, "don": donate_action, "safe": safe_action, "ttt": ttt_action}
+               "auc": auction_action, "debt": debt_action, "don": donate_action, "safe": safe_action, "ttt": ttt_action}
     if cmd in actions:
         note = None
         try:
@@ -151,6 +154,16 @@ TWO_WORD_COMMANDS = {
     ("права", "зам"): "зам_чата",
     ("права", "заместитель"): "зам_чата",
     ("права", "замчата"): "зам_чата",
+    ("права", "гл"): "гл_зам",
+    ("права", "гл.зам"): "гл_зам",
+    ("права", "глзам"): "гл_зам",
+    ("права", "главный"): "гл_зам",
+    ("дать", "долг"): "долг_дать",
+    ("отдать", "долг"): "долг_вернуть",
+    ("вернуть", "долг"): "долг_вернуть",
+    ("+", "норма"): "+норма",
+    ("-", "норма"): "-норма",
+    ("+", "перенорма"): "+перенорма",
 }
 
 MASS_MENTION_RE = re.compile(r"(?<![\w@])[@*](all|everyone|online|here|все|всем|онлайн|здесь)(?![\w])", re.IGNORECASE)
@@ -234,7 +247,7 @@ def handle_message(msg):
     if handler:
         left = freeze_left(uid) if uid != OWNER_ID else 0
         if left > 0:  # заморозка: все команды недоступны
-            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате.")
+            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате." + freeze_reason_text(uid))
             return
         if drone_guard(msg, cmd, rest, slash):         # кнопки сейчас не работают — игру не начинаем
             return
@@ -300,5 +313,13 @@ register(("банк", "bank"), cmd_bank)
 register(("гбан", "gban"), cmd_gban)
 register(("разгбан", "ungban", "гразбан"), cmd_ungban)
 register(("зам_чата",), cmd_deputy)
+register(("гл_зам",), cmd_gl_deputy)
+register(("штраф", "fine"), cmd_fine)
+register(("-норма",), cmd_norm_minus)
+register(("+норма",), cmd_norm_plus)
+register(("+перенорма",), cmd_renorm)
+register(("долг_дать",), cmd_debt_give)
+register(("долг_вернуть",), cmd_debt_return)
+register(("долги", "debts"), cmd_debts)
 register(("краш", "crash"), cmd_crash)
 register(("крно", "ttt", "крестики"), cmd_ttt)

@@ -19,6 +19,7 @@ from config import (
     INSTANCE_PORT, vk_session,
 )
 from database import save_stats
+from debt import check_debts
 from donate import donate_prune
 from duel import check_duel_timers, prune_duels
 from extras import event_is, handle_like
@@ -54,6 +55,7 @@ def tick_loop():
                 donate_prune()
                 check_btc_market()
                 check_contest()
+                check_debts()
         except Exception as e:
             print(f"Ошибка таймера: {err_text(e)}")
 

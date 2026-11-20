@@ -5,7 +5,8 @@ import time
 
 from chats import known_chats
 from config import (
-    BROADCAST_DELAY, DEPUTY_LEVEL, err_text, GBAN_MIN_RANK, GBAN_TAG, MIN_LEVEL_TO_DEPUTY, OWNER_ID,
+    BROADCAST_DELAY, DEPUTY_LEVEL, err_text, GBAN_MIN_RANK, GBAN_TAG, GL_DEPUTY_LEVEL, GL_DEPUTY_RANK,
+    MIN_LEVEL_TO_DEPUTY, OWNER_ID,
 )
 from database import data, get_level, is_deputy, punish, raw_level, save_data, save_punish, set_level
 from helpers import deny, get_names, kick_from_chat, mention, no_target, parse_target, send
@@ -19,6 +20,8 @@ def rank(peer_id, uid):
     if uid == OWNER_ID:
         return 100
     raw = raw_level(peer_id, uid)
+    if raw == GL_DEPUTY_LEVEL:
+        return GL_DEPUTY_RANK
     return 35 if raw == DEPUTY_LEVEL else raw * 10
 
 
@@ -163,8 +166,8 @@ def gban_guard(msg):
 def cmd_deputy(msg, rest, slash):
     """«права зам (ответом / ID)» и «права зам снять ID» — вызывается через псевдоним в handlers.py."""
     peer_id, uid = msg["peer_id"], msg["from_id"]
-    if get_level(peer_id, uid) < MIN_LEVEL_TO_DEPUTY:
-        deny(msg, rest, slash, "⛔ Назначать «Зам чата» может Тех специалист и выше.")
+    if get_level(peer_id, uid) < MIN_LEVEL_TO_DEPUTY and rank(peer_id, uid) < GL_DEPUTY_RANK:
+        deny(msg, rest, slash, "⛔ Назначать «Зам чата» может Тех специалист, Гл.Следящий Зам и Владелец.")
         return
     words = rest.split()
     if words and words[0].lower() == "чата":
@@ -190,7 +193,7 @@ def cmd_deputy(msg, rest, slash):
         set_level(peer_id, target, 0)
         send(peer_id, f"✅ {mention(target, names)} больше не Зам чата.")
         return
-    if get_level(peer_id, target) >= MIN_LEVEL_TO_DEPUTY:
+    if get_level(peer_id, target) >= MIN_LEVEL_TO_DEPUTY or raw_level(peer_id, target) == GL_DEPUTY_LEVEL:
         send(peer_id, "⛔ У этого пользователя уже должность выше.")
         return
     set_level(peer_id, target, DEPUTY_LEVEL)

@@ -10,7 +10,7 @@ from datetime import datetime
 
 from config import (
     BACKUP_DIR, BACKUP_KEEP, BTC_START_RATE, DAILY_FILE, DATA_FILE, DB_FILE, DEPUTY_AS_LEVEL,
-    DEPUTY_LEVEL, ECONOMY_FILE,
+    DEPUTY_LEVEL, ECONOMY_FILE, GL_DEPUTY_LEVEL,
     err_text, LOGS_DIR, OWNER_ID, PLAYER_LEVELS, PROMO_TTL, PUNISH_FILE, STATS_FILE,
     STATS_SAVE_INTERVAL, VIP_DAYS, VIP_PREFIX,
 )
@@ -302,6 +302,10 @@ def _build_tables():
               equip_flatten, equip_load),
         Table("bank_lots", "economy", [("user_id", "INTEGER"), ("seq", "INTEGER")],
               [("amount", "INTEGER"), ("t", "REAL")], bank_flatten, bank_load),
+        _entity("debts", "economy", econ("debts"), "debt_id", True,
+                [("lender", "lender", "INTEGER", "i"), ("borrower", "borrower", "INTEGER", "i"),
+                 ("amount", "amount", "INTEGER", "i"), ("due", "due", "REAL", "r"), ("status", "status", "TEXT", "t"),
+                 ("peer", "peer_id", "INTEGER", "i"), ("t", "created", "INTEGER", "i"), ("term", "term_days", "INTEGER", "i")]),
         _entity("promos", "economy", econ("promos"), "promo_key", False, promos_f, skip=("used_by",)),
         Table("promo_uses", "economy", [("promo_key", "TEXT"), ("seq", "INTEGER")], [("user_id", "INTEGER")],
               puses_flatten, puses_load),
@@ -331,6 +335,7 @@ def _build_tables():
                lambda r: {"by": r[0], "reason": r[1], "t": r[2]}),
         Table("warns", "punish", [("peer_id", "INTEGER"), ("user_id", "INTEGER"), ("seq", "INTEGER")],
               [("by_user", "INTEGER"), ("reason", "TEXT"), ("created", "INTEGER")], warns_flatten, warns_load),
+        _pairs("norms", "punish", punished("norms"), [("n", "INTEGER")], lambda v: (_i(v),), lambda r: int(r[0])),
         _entity("gbans", "punish", punished("gbans"), "user_id", True,
                 [("by", "by_user", "INTEGER", "i"), ("reason", "reason", "TEXT", "t"), ("t", "created", "INTEGER", "i")]),
         _singles("timeouts", "punish", punished("timeouts"), "peer_id", "INTEGER", "until", "REAL", _r, float),
@@ -382,7 +387,7 @@ def db_save(group):
 
 def ensure_defaults():
     for key in ("users", "promos", "games", "duels", "reports", "report_mode", "report_blocked",
-                "report_staff", "approvals", "roulette", "refs", "auction", "donate_orders", "donate_blocked", "bank"):
+                "report_staff", "approvals", "roulette", "refs", "auction", "donate_orders", "donate_blocked", "bank", "debts"):
         economy.setdefault(key, {})
     economy.setdefault("seq", {})
     economy.setdefault("media", {})
@@ -393,7 +398,7 @@ def ensure_defaults():
         economy["btc"].setdefault(_k, _v)
     for key in ("duel", "report", "approval", "roulette", "auction", "donate"):
         economy["seq"].setdefault(key, 0)
-    for key in ("mutes", "bans", "warns", "timeouts", "freezes", "grant_log", "gbans"):
+    for key in ("mutes", "bans", "warns", "timeouts", "freezes", "grant_log", "gbans", "norms"):
         punish.setdefault(key, {})
     daily.setdefault("counts", {})
     daily.setdefault("history", {})
@@ -524,10 +529,13 @@ def get_level(peer_id, user_id):
     """Уровень для проверок прав. «Зам чата» считается Администратором (DEPUTY_AS_LEVEL),
     поэтому ни одна старая проверка не примет его за Владельца."""
     lvl = raw_level(peer_id, user_id)
-    return DEPUTY_AS_LEVEL if lvl == DEPUTY_LEVEL else lvl
+    return DEPUTY_AS_LEVEL if lvl in (DEPUTY_LEVEL, GL_DEPUTY_LEVEL) else lvl
 
 def is_deputy(peer_id, user_id):
     return user_id != OWNER_ID and raw_level(peer_id, user_id) == DEPUTY_LEVEL
+
+def is_gl_deputy(peer_id, user_id):
+    return user_id != OWNER_ID and raw_level(peer_id, user_id) == GL_DEPUTY_LEVEL
 
 def set_level(peer_id, user_id, level):
     chat = data.setdefault(str(peer_id), {})
