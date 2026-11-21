@@ -6,10 +6,10 @@ import time
 
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 
-from business import biz_accrued, biz_owned, biz_preview, kk_text
+from business import biz_accrued, biz_income, biz_level, biz_owned, biz_preview, biz_total_value, kk_text
 from config import (
     AUCTION_MAX_LOTS, AUCTION_MAX_PERCENT, AUCTION_MIN_PERCENT, AUCTION_PAGE, AUCTION_TTL,
-    BUSINESSES, err_text, OWNER_ID,
+    BIZ_MAX_LEVEL, BUSINESSES, err_text, OWNER_ID,
 )
 from database import economy, get_user, save_economy
 from helpers import (
@@ -23,18 +23,22 @@ from shop import in_auction, item_preview, KK, owned, SECRET_ITEMS, SHOP_ITEMS
 # «продать перс ID СУММА» / «продать бизнес НАЗВАНИЕ СУММА» — вещь уходит на аукцион (хранится у аукциона, пока лот висит),
 # «аук» — все лоты, купить можно кнопкой или «аук купить №». Деньги сразу идут продавцу, вещь — покупателю.
 # Защита экономики: цена лота — от AUCTION_MIN_PERCENT% до AUCTION_MAX_PERCENT% от цены в магазине.
+# У бизнеса с улучшениями «цена в магазине» = цена бизнеса + вложенное в улучшения. Уровень (lot["lvl"]) уходит покупателю.
 AUC_CHAR_WORDS = ("перс", "персонаж", "персонажа", "персонажей", "персы", "character", "char")
 AUC_BIZ_WORDS = ("бизнес", "бизнеса", "business")
 
 def _norm(text):
     return text.lower().replace("ё", "е").strip()
 
-def lot_base_price(kind, item):
-    """Цена вещи в магазине — от неё считаются границы цены лота."""
-    return SHOP_ITEMS[item][2] * KK if kind == "char" else BUSINESSES[item]["price"]
+def lot_base_price(kind, item, lvl=0):
+    """Цена вещи в магазине — от неё считаются границы цены лота. Бизнес — вместе с вложенным в улучшения."""
+    return SHOP_ITEMS[item][2] * KK if kind == "char" else biz_total_value(item, lvl)
 
-def lot_price_range(kind, item):
-    base = lot_base_price(kind, item)
+def lot_base_label(lvl=0):
+    return "с улучшениями" if lvl else "в магазине"
+
+def lot_price_range(kind, item, lvl=0):
+    base = lot_base_price(kind, item, lvl)
     low = base * AUCTION_MIN_PERCENT // 100
     high = base * AUCTION_MAX_PERCENT // 100 if AUCTION_MAX_PERCENT else None
     return low, high
@@ -47,7 +51,8 @@ def lot_hidden(lot, viewer):
 def lot_name(lot, viewer):
     if lot["kind"] == "biz":
         b = BUSINESSES[lot["item"]]
-        return f"{b['emoji']} {b['name']}"
+        lvl = lot.get("lvl", 0)
+        return f"{b['emoji']} {b['name']}" + (f" (ур. {lvl})" if lvl else "")
     return "🎭 ??? (секретный персонаж)" if lot_hidden(lot, viewer) else f"🎭 {SHOP_ITEMS[lot['item']][1]}"
 
 def lots_of(uid):
@@ -68,24 +73,29 @@ def find_biz(ident):
     ident = _norm(ident)
     return next((k for k, b in BUSINESSES.items() if k == ident or _norm(b["name"]) == ident), None)
 
-def lot_give(user, kind, item, equip):
-    """Вещь из лота — игроку. Купленный персонаж сразу надевается (как в магазине)."""
+def lot_give(user, kind, item, equip, lvl=0):
+    """Вещь из лота — игроку. Купленный персонаж сразу надевается (как в магазине). Бизнес приходит с его уровнем."""
     if kind == "char":
         user.setdefault("items", []).append(item)
         if equip:
             user.setdefault("equip", {})[SHOP_ITEMS[item][0]] = item
     else:
         user.setdefault("biz", {})[item] = time.time()
+        if lvl:
+            user.setdefault("biz_lvl", {})[item] = lvl
+        else:
+            (user.get("biz_lvl") or {}).pop(item, None)
 
 def auction_return(lot):
     """Лот снят или не продался — вещь возвращается продавцу (если вдруг такая уже есть — деньги по цене магазина)."""
     user = get_user(lot["seller"])
     kind, item = lot["kind"], lot["item"]
     have = owned(user, item) if kind == "char" else item in biz_owned(user)
+    lvl = lot.get("lvl", 0)
     if have:
-        user["money"] += lot_base_price(kind, item)
+        user["money"] += lot_base_price(kind, item, lvl)
     else:
-        lot_give(user, kind, item, equip=False)
+        lot_give(user, kind, item, equip=False, lvl=lvl)
 
 def auction_sell(msg, kind, args):
     peer_id, uid = msg["peer_id"], msg["from_id"]
@@ -96,13 +106,15 @@ def auction_sell(msg, kind, args):
     else:
         usage = ("ℹ️ Продать бизнес другому игроку: продать бизнес НАЗВАНИЕ СУММА\n"
                  "Пример: продать бизнес Пекарня 1,2ккк\n"
-                 "Накопленный доход бизнеса выплачивается вам сразу при выставлении.")
+                 "Накопленный доход бизнеса выплачивается вам сразу при выставлении.\n"
+                 "Уровень улучшения уходит покупателю вместе с бизнесом.")
     price = parse_amount(args[-1]) if len(args) >= 2 else None
     if price is None:
         send(peer_id, usage)
         return
     ident = " ".join(args[:-1])
     user = get_user(uid)
+    lvl = 0
 
     if kind == "char":
         item = find_char_id(ident)
@@ -121,19 +133,21 @@ def auction_sell(msg, kind, args):
         if item not in biz_owned(user):
             send(peer_id, f"❌ У вас нет бизнеса «{BUSINESSES[item]['name']}».")
             return
-        title = f"{BUSINESSES[item]['emoji']} {BUSINESSES[item]['name']}"
+        lvl = biz_level(user, item)
+        title = f"{BUSINESSES[item]['emoji']} {BUSINESSES[item]['name']}" + (f" (ур. {lvl})" if lvl else "")
 
     if len(lots_of(uid)) >= AUCTION_MAX_LOTS:
         send(peer_id, f"⛔ У вас уже {AUCTION_MAX_LOTS} лотов — это максимум. Снять лот: аук снять №")
         return
-    low, high = lot_price_range(kind, item)
-    base = lot_base_price(kind, item)
+    low, high = lot_price_range(kind, item, lvl)
+    base = lot_base_price(kind, item, lvl)
+    where = "Цена в магазине" if not lvl else "Цена бизнеса с улучшениями"
     if price < low:
-        send(peer_id, f"⛔ Слишком дёшево. Цена в магазине — {kk_text(base)}, дешевле {AUCTION_MIN_PERCENT}% "
+        send(peer_id, f"⛔ Слишком дёшево. {where} — {kk_text(base)}, дешевле {AUCTION_MIN_PERCENT}% "
                       f"({fmt_num(low)} 💰) ставить нельзя — это защита экономики.")
         return
     if high and price > high:
-        send(peer_id, f"⛔ Слишком дорого. Цена в магазине — {kk_text(base)}, дороже {AUCTION_MAX_PERCENT}% "
+        send(peer_id, f"⛔ Слишком дорого. {where} — {kk_text(base)}, дороже {AUCTION_MAX_PERCENT}% "
                       f"({fmt_num(high)} 💰) ставить нельзя.")
         return
 
@@ -147,16 +161,19 @@ def auction_sell(msg, kind, args):
         paid = biz_accrued(user, item, time.time())
         user["money"] += paid
         del user["biz"][item]
+        (user.get("biz_lvl") or {}).pop(item, None)          # уровень уходит вместе с бизнесом (хранится в лоте)
         if paid:
             extra = f"\n💵 Накопленный доход выплачен вам: +{fmt_num(paid)} 💰"
     economy["seq"]["auction"] += 1
     lid = economy["seq"]["auction"]
     economy["auction"][str(lid)] = {"id": lid, "kind": kind, "item": item, "seller": uid,
                                     "price": price, "t": time.time()}
+    if lvl:
+        economy["auction"][str(lid)]["lvl"] = lvl
     save_economy()
     log_action(peer_id, uid, f"аукцион: выставил лот №{lid} ({kind} {item}) за {price}")
     send(peer_id, f"🏛 Лот №{lid} выставлен на аукцион\n{title} — {fmt_num(price)} 💰\n"
-                  f"(в магазине {kk_text(base)}){extra}\n\n"
+                  f"({lot_base_label(lvl)} {kk_text(base)}){extra}\n\n"
                   f"Лот висит {AUCTION_TTL // 86400} дн., потом вещь вернётся к вам. Снять раньше: аук снять {lid}")
 
 def auction_buy(peer_id, uid, lot_id):
@@ -178,12 +195,14 @@ def auction_buy(peer_id, uid, lot_id):
     user["money"] -= price
     seller["money"] += price
     del economy["auction"][str(lot_id)]
-    lot_give(user, kind, item, equip=True)
+    lvl = lot.get("lvl", 0)
+    lot_give(user, kind, item, equip=True, lvl=lvl)
     save_economy()
     log_action(peer_id, uid, f"аукцион: купил лот №{lot_id} ({kind} {item}) за {price} у {lot['seller']}")
     log_action(peer_id, lot["seller"], f"аукцион: продан лот №{lot_id} ({kind} {item}) за {price} → {uid}")
     names = get_names([uid, lot["seller"]])
-    real = SHOP_ITEMS[item][1] if kind == "char" else f"{BUSINESSES[item]['emoji']} {BUSINESSES[item]['name']}"
+    real = (SHOP_ITEMS[item][1] if kind == "char"
+            else f"{BUSINESSES[item]['emoji']} {BUSINESSES[item]['name']}" + (f" (ур. {lvl})" if lvl else ""))
     what = "секретного персонажа" if item in SECRET_ITEMS and kind == "char" else f"«{real}»"   # секрет в беседе не раскрываем
     try:
         send(peer_id, f"🏛 {mention(uid, names)} купил(а) {what} у {mention(lot['seller'], names)} "
@@ -236,9 +255,10 @@ def build_auction_page(peer_id, page, opener_id):
     for lot in chunk:
         extra = ""
         if lot["kind"] == "biz":
-            extra = f" · доход {kk_text(BUSINESSES[lot['item']]['income'])}/12ч"
+            extra = f" · доход {kk_text(biz_income(lot['item'], lot.get('lvl', 0)))}/12ч"
+        lvl = lot.get("lvl", 0)
         lines.append(f"№{lot['id']} {lot_name(lot, opener_id)} — {fmt_num(lot['price'])} 💰")
-        lines.append(f"   в магазине {kk_text(lot_base_price(lot['kind'], lot['item']))}{extra} · "
+        lines.append(f"   {lot_base_label(lvl)} {kk_text(lot_base_price(lot['kind'], lot['item'], lvl))}{extra} · "
                      f"продавец {mention(lot['seller'], names)}")
     lines += ["",
               "Купить — кнопкой или «аук купить №». Фото и подробности: «аук №».",
@@ -269,17 +289,20 @@ def auction_show(peer_id, viewer, lot_id):
         return
     kind, item = lot["kind"], lot["item"]
     names = get_names([lot["seller"]])
+    lvl = lot.get("lvl", 0)
     lines = [f"🏛 Лот №{lot['id']}", "", lot_name(lot, viewer)]
     if kind == "biz":
         b = BUSINESSES[item]
-        lines += [b["desc"], f"Доход: {fmt_num(b['income'])} 💰 за 12 ч. ({kk_text(b['income'])})"]
+        inc = biz_income(item, lvl)
+        lines += [b["desc"], f"Уровень: {lvl}/{BIZ_MAX_LEVEL}",
+                  f"Доход: {fmt_num(inc)} 💰 за 12 ч. ({kk_text(inc)})"]
         att = biz_preview(peer_id, item)
     else:
         hidden = lot_hidden(lot, viewer)
         lines.append("Секретный персонаж. Что внутри — узнаете после покупки" if hidden else SHOP_ITEMS[item][3])
         att = item_preview(peer_id, item, hidden=hidden)
     left = AUCTION_TTL - (time.time() - lot["t"])
-    lines += [f"💰 Цена: {fmt_num(lot['price'])} (в магазине {kk_text(lot_base_price(kind, item))})",
+    lines += [f"💰 Цена: {fmt_num(lot['price'])} ({lot_base_label(lvl)} {kk_text(lot_base_price(kind, item, lvl))})",
               f"Продавец: {mention(lot['seller'], names)}",
               f"Лот закроется через {fmt_duration(max(0, left))}"]
     kb = VkKeyboard(inline=True)
