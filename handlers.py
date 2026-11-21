@@ -20,7 +20,7 @@ from database import count_message, economy, freeze_left, get_level, mute_left
 from donate import build_donate_page, cmd_donate, donate_action, DONATE_KEYS
 from duel import cmd_duel, duel_action
 from extras import (
-    APPEAL_WORDS, cmd_appeal, cmd_safe, cmd_steal, handle_appeal_callback, safe_action,
+    cmd_safe, cmd_steal, handle_appeal_callback, safe_action,
 )
 from fishing import cmd_fishing, fish_action
 from gban import cmd_deputy, cmd_gban, cmd_ungban, gban_guard
@@ -53,6 +53,7 @@ from staff_money import (
     handle_approval_callback, try_plain_promo,
 )
 from transfer import cmd_transfer
+from wipe import cmd_restore_account, wipe_callback
 from ttt import cmd_ttt, ttt_action, ttt_text_move
 
 
@@ -74,6 +75,9 @@ def handle_callback(ev):
         return
     if cmd == "rate":                 # оценка следящего игроком (звёздочки в ЛС)
         handle_rate_callback(ev, payload)
+        return
+    if cmd == "wipe":                   # кнопки «Обнулить у обоих / Отказать» в ЛС владельца
+        wipe_callback(ev, payload)
         return
     if cmd == "appeal":               # «Я заполнил(а)» под апелляцией (в беседе и в ЛС)
         handle_appeal_callback(ev, payload)
@@ -307,7 +311,7 @@ register(("укусить", "bite", "украсть", "steal"), cmd_steal)
 register(("питомцы", "питомец", "пит", "pets", "pet"), cmd_pets)
 register(("офиц", "official"), cmd_official)
 register(("сейф", "safe"), cmd_safe)
-register(APPEAL_WORDS, cmd_appeal)
+register(("восстановить", "restore"), cmd_restore_account)   # владелец: вернуть обнулённый аккаунт
 register(("банк", "bank"), cmd_bank)
 register(("гбан", "gban"), cmd_gban)
 register(("разгбан", "ungban", "гразбан"), cmd_ungban)

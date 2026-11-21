@@ -15,6 +15,7 @@ from helpers import (
 )
 from logs import log_action
 from mines import check_idle_mines, prune_games
+from wipe import note_surrender
 
 
 # ---------- Крестики-нолики ----------
@@ -142,6 +143,11 @@ def ttt_finish(g, winner=None, how="line", loser=None):
     save_economy()
     text = "\n".join(ttt_head_lines(g, names) + ["", ttt_board_text(g, line), "", tail])
     ttt_edit_or_send(g, text)
+    if winner and how == "surrender" and loser:      # два «сдался» подряд одному сопернику — владельцу уведомление
+        try:
+            note_surrender(g, loser, winner)
+        except Exception as e:
+            print(f"Ошибка слежки за сдачами: {err_text(e)}")
 
 def ttt_move(g, uid, cell, ev=None):
     """Ход игрока (кнопкой или командой «ход N»). Возвращает подсказку для игрока или None."""

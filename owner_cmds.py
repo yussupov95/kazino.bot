@@ -7,6 +7,7 @@ from helpers import (
 )
 from logs import log_action
 from staff_money import create_promo
+from wipe import find_id, restore_command
 
 
 # ---------- «хелп-команды» (только владелец, только в ЛС боту) ----------
@@ -67,6 +68,29 @@ def owner_extra_commands(msg, text):
             send(peer_id, f"⚠ Максимум: {fmt_num(MAX_GRANT)} 💰")
             return True
         create_promo(peer_id, OWNER_ID, name, amount, int(uses_text))
+        return True
+
+    if word in ("восстановить", "restore"):          # «восстановить ID»; без ID — это база из файла (backup.py)
+        return restore_command(msg, " ".join(parts[1:]), strict=True)
+
+    if word in ("забрать", "take"):                  # «забрать ID СУММА»
+        args = parts[1:]
+        if len(args) != 2:
+            return False
+        target = find_id(msg, args[0])
+        user = get_user(target) if target and target > 0 else None
+        amount = parse_amount(args[1], user["money"] if user else None, regex=OWNER_AMOUNT_RE) if user else None
+        if user is None or amount is None:
+            send(peer_id, "ℹ️ Забрать деньги: забрать ID СУММА (или «все»)")
+            return True
+        names = get_names([target])
+        if amount > user["money"]:
+            send(peer_id, f"⚠ У {mention(target, names)} только {fmt_num(user['money'])} 💰")
+            return True
+        user["money"] -= amount
+        save_economy()
+        log_action(peer_id, OWNER_ID, f"забрал деньги {amount} у {target} (из ЛС)")
+        send(peer_id, f"💰 У {mention(target, names)} забрано {fmt_num(amount)} 💰\nБаланс: {fmt_num(user['money'])} 💰")
         return True
 
     idx = None

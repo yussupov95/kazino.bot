@@ -16,6 +16,7 @@ from helpers import (
     check_punish_target, delete_message, deny, extract_target, fmt_duration, fmt_time,
     get_names, kick_from_chat, mention, parse_target, send,
 )
+from extras import appeal_keyboard
 from logs import log_action
 from referral import check_referral_join
 from reports_owner import report_staff_rights
@@ -62,7 +63,7 @@ def cmd_mute(msg, rest, slash):
     names = get_names([target, actor])
     send(peer_id, f"🔇 {mention(target, names)} получил мут на {fmt_duration(seconds)} "
                   f"(до {fmt_time(until)}).\nМодератор: {mention(actor, names)}\n"
-                  "Все его сообщения будут удаляться.")
+                  "Все его сообщения будут удаляться.", appeal_keyboard(target))
 
 def cmd_unmute(msg, rest, slash):
     peer_id = msg["peer_id"]
@@ -140,7 +141,7 @@ def punish_cmd(msg, rest, slash, ban):
                           "а исключаемый — участником (не админом).")
             return
         text = f"👢 {who} исключён из беседы."
-    send(peer_id, f"{text}\nПричина: {reason}\nМодератор: {admin}")
+    send(peer_id, f"{text}\nПричина: {reason}\nМодератор: {admin}", appeal_keyboard(target))
 
 def cmd_kick(msg, rest, slash):
     punish_cmd(msg, rest, slash, ban=False)
@@ -350,7 +351,7 @@ def cmd_warn(msg, rest, slash):
             print(f"Не удалось исключить за варны {target}: {err_text(e)}")
             text += "\n\n❌ Лимит достигнут, но исключить не удалось (бот должен быть админом беседы)."
     log_action(peer_id, actor, f"варн {target} ({count}/{WARNS_LIMIT}): {reason}")
-    send(peer_id, text)
+    send(peer_id, text, appeal_keyboard(target))
 
 def cmd_unwarn(msg, rest, slash):
     peer_id = msg["peer_id"]
@@ -452,7 +453,7 @@ def cmd_freeze(msg, rest, slash):
     period = f"на {fmt_duration(minutes * 60)}" if minutes else "без срока"
     send(peer_id, f"🧊 {mention(target, names)} заморожен {period}.\n"
                   "Он может только общаться в чате: все команды и кнопки бота недоступны.\n"
-                  f"Модератор: {mention(actor, names)}")
+                  f"Модератор: {mention(actor, names)}", appeal_keyboard(target))
 
 def cmd_unfreeze(msg, rest, slash):
     peer_id = msg["peer_id"]

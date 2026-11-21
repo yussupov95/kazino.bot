@@ -185,7 +185,33 @@ def cmd_appeal(msg, rest, slash):
     kb.add_callback_button("✅ Я заполнил(а)", VkKeyboardColor.POSITIVE, {"cmd": "appeal", "o": uid})
     send(peer_id, text, kb.get_keyboard())
 
+def appeal_keyboard(uids):
+    """Кнопка «Отправить обжалование» под сообщением о наказании. uids — кому можно нажимать (число или список)."""
+    kb = VkKeyboard(inline=True)
+    kb.add_callback_button("📝 Отправить обжалование", VkKeyboardColor.SECONDARY,
+                           {"cmd": "appeal", "a": "start", "o": uids})
+    return kb.get_keyboard()
+
+def appeal_start(ev, p):
+    """Нажатие «Отправить обжалование»: форма приходит в ЛС (если ЛС закрыты — в беседу)."""
+    uid, peer_id = ev["user_id"], ev["peer_id"]
+    owners = p.get("o")
+    if uid not in (owners if isinstance(owners, list) else [owners]):
+        return "Эта кнопка не для вас."
+    form, _ = appeal_urls()
+    if not form:
+        return "Ссылка пока не настроена. Напишите владельцу."
+    try:
+        cmd_appeal({"peer_id": uid, "from_id": uid}, "", False)
+        return "📨 Форма отправлена вам в ЛС бота."
+    except Exception:
+        pass
+    cmd_appeal({"peer_id": peer_id, "from_id": uid}, "", False)
+    return "Форма — в сообщении ниже."
+
 def appeal_action(ev, p):
+    if p.get("a") == "start":
+        return appeal_start(ev, p)
     peer_id, uid, cmid = ev["peer_id"], ev["user_id"], ev["conversation_message_id"]
     if uid != p.get("o"):
         return "Это не ваша кнопка. Напишите «апелляция» сами."
