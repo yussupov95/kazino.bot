@@ -16,7 +16,7 @@ from bitcoin import check_btc_market
 from contest import check_contest
 from config import (
     _asset, BTC_IMAGE, BUSINESSES, CHAT_OFFSET, DONATE_QR_FILE, err_text, _find, GROUP_ID,
-    INSTANCE_PORT, vk_session,
+    INSTANCE_PORT, PETS, vk_session,
 )
 from database import save_stats
 from debt import check_debts
@@ -31,6 +31,7 @@ from mines import check_stuck_games, migrate_legacy_mines, prune_games
 from reports_actions import check_report_dialogs
 from reports_owner import handle_dm
 from roulette import check_roulette_reveals, prune_roulette, roulette_warmup
+from pets import pet_image_path
 from shop import (
     ART_VERSION, CHAR_FILES, cleanup_removed_items, ensure_art_version, reset_staff_looks,
     SHOP_ITEMS,
@@ -97,6 +98,8 @@ def main():
     print("  картинка bitcoin.jpg: " + (f"найдена ({BTC_IMAGE})" if os.path.exists(BTC_IMAGE) else "НЕ НАЙДЕНА — положите рядом с ботом"))
     for _k, _b in BUSINESSES.items():
         print(f"  картинка {_b['file']} ({_b['name']}): " + ("найдена" if os.path.exists(_find(_b["file"])) else "НЕ НАЙДЕНА — положите рядом с ботом"))
+    for _pid, _pet in PETS.items():
+        print(f"  картинка питомца {_pet['file']} ({_pet['name']}): " + ("найдена" if pet_image_path(_pid) else "НЕ НАЙДЕНА — положите рядом с ботом"))
     print("Бот запущен")
     try:
         while True:

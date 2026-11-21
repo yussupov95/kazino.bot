@@ -9,8 +9,9 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from config import (
     CHAT_OFFSET, DONATE_BOT_LINK, DONATE_CARD, DONATE_CARD_BANK, DONATE_CREATE_COOLDOWN,
     DONATE_ITEMS, DONATE_MAX_RECEIPTS, DONATE_MAX_WAIT, DONATE_OPEN_TTL, DONATE_PREFIX_BANNED,
-    DONATE_PREFIX_MAX, DONATE_QR_FILE, err_text, fmt_pct, HEAL_DAYS, heal_left, OWNER_ID,
-    VAMPIRE_COOLDOWN, VAMPIRE_PERCENT, VAMPIRE_TITLE, VAMPIRE_TOP_PERCENT, vk_upload,
+    DONATE_PET_ID, DONATE_PREFIX_MAX, DONATE_QR_FILE, err_text, fmt_pct, give_pet, HEAL_DAYS,
+    has_pet, heal_left, OWNER_ID, PET_COOLDOWN, PETS, VAMPIRE_COOLDOWN, VAMPIRE_PERCENT,
+    VAMPIRE_TITLE, VAMPIRE_TOP_PERCENT, vk_upload,
 )
 from database import economy, get_user, save_economy
 from helpers import (
@@ -83,7 +84,7 @@ def donate_card(order, text, kb, attachment=None):
     order["cmid"], order["dm_text"] = cmid, text
     save_economy()
 
-DONATE_KEYS = ("vamp", "heal", "virt", "pref")      # порядок привилегий в «донат»
+DONATE_KEYS = ("vamp", "heal", "virt", "pref", "pet")      # порядок привилегий в «донат»
 
 def strike(text):
     """Зачёркнутый текст. VK не понимает разметку, поэтому после каждого символа ставится «перечёркивание»."""
@@ -104,7 +105,7 @@ def donate_details(key):
             "",
             "Как работает:",
             "• «укусить» ответом на сообщение игрока или «укусить @имя»",
-            "• можно просто написать @упоминание — это тоже укус",
+            "• кусает только по команде: простое @упоминание не считается",
             f"• обычного игрока кусает на {fmt_pct(VAMPIRE_PERCENT)}% его баланса",
             f"• игрока на 1 месте в топе по балансу — только на {fmt_pct(VAMPIRE_TOP_PERCENT)}%",
             f"• кд: раз в {VAMPIRE_COOLDOWN // 3600} ч.",
@@ -128,6 +129,21 @@ def donate_details(key):
             "",
             f"• +{fmt_num(DONATE_ITEMS['virt']['money'])} 💰 за одну покупку",
             "• можно покупать сколько угодно раз",
+        ]
+    if key == "pet":
+        pet = PETS[DONATE_PET_ID]
+        return [
+            f"Что это: питомец «{pet['name']}» — самый сильный из питомцев (уровень {pet['level']}).",
+            "Для чего: красть деньги у других игроков.",
+            "",
+            "Как работает:",
+            "• «пит украсть» ответом на сообщение игрока или «пит украсть @имя»",
+            f"• забирает {fmt_pct(pet['percent'])}% баланса игрока",
+            f"• кд: раз в {PET_COOLDOWN // 3600} ч.",
+            "• красть можно у игрока без такого же питомца и без питомца сильнее",
+            "• у Вампиров красть нельзя",
+            "• покупается один раз, без срока действия",
+            "• посмотреть всех питомцев с фото: «питомцы»",
         ]
     return [
         "Что это: свой префикс — любой текст рядом с вашим ником.",
@@ -171,7 +187,9 @@ def build_donate_page(peer_id, page, opener_id):
     kb.add_callback_button("Вперед ▶", VkKeyboardColor.SECONDARY, {"cmd": "dpg", "p": next_page, "o": opener_id})
     kb.add_line()
     if key == "vamp" and user.get("vampire"):
-        kb.add_callback_button("🧛 Вампир — уже у вас", VkKeyboardColor.SECONDARY, {"cmd": "don", "act": "have", "o": opener_id})
+        kb.add_callback_button("🧛 Вампир — уже у вас", VkKeyboardColor.SECONDARY, {"cmd": "don", "act": "have", "k": "vamp", "o": opener_id})
+    elif key == "pet" and has_pet(user, DONATE_PET_ID):
+        kb.add_callback_button("🐶 Питомец — уже у вас", VkKeyboardColor.SECONDARY, {"cmd": "don", "act": "have", "k": "pet", "o": opener_id})
     else:
         kb.add_callback_button(f"🛒 Купить · {item['price']} ₽", VkKeyboardColor.POSITIVE,
                                {"cmd": "don", "act": "buy", "k": key, "o": opener_id})
@@ -203,6 +221,8 @@ def donate_create(uid, item_key, data="", chat_peer=None):
     user = get_user(uid)
     if item_key == "vamp" and user.get("vampire"):
         return f"🧛 Вы уже {VAMPIRE_TITLE}."
+    if item_key == "pet" and has_pet(user, DONATE_PET_ID):
+        return f"🐶 Питомец «{PETS[DONATE_PET_ID]['name']}» у вас уже есть."
     if item_key == "heal":
         if user.get("vampire"):
             return f"🧛 {VAMPIRE_TITLE}ов другие вампиры не кусают — зелье вам не нужно."
@@ -331,7 +351,15 @@ def donate_finish(order):
     uid, key = order["uid"], order["item"]
     user = get_user(uid)
     duplicate = False
-    if key == "vamp":
+    dup_label = f"должность «{VAMPIRE_TITLE}»"
+    if key == "pet":
+        pet = PETS[DONATE_PET_ID]
+        duplicate = has_pet(user, DONATE_PET_ID)
+        dup_label = f"питомец «{pet['name']}»"
+        give_pet(user, DONATE_PET_ID)
+        reward = (f"🐶 Теперь у вас питомец «{pet['name']}»! Раз в {PET_COOLDOWN // 3600} ч. он может украсть {fmt_pct(pet['percent'])}% баланса игрока.\n"
+                  "Команда: «пит украсть» (ответом на сообщение игрока) или «пит украсть @имя». Все питомцы: «питомцы».")
+    elif key == "vamp":
         duplicate = bool(user.get("vampire"))
         user["vampire"] = True
         user.setdefault("vampire_since", time.time())
@@ -355,8 +383,8 @@ def donate_finish(order):
     save_economy()
     log_action(order.get("peer") or uid, uid, f"донат: принят заказ №{order['id']} ({key}, {order['price']}₽)")
     if duplicate:
-        donate_notify(uid, f"✅ Оплата заказа №{order['id']} принята, но должность «{VAMPIRE_TITLE}» у вас уже есть. Владелец свяжется с вами.")
-        donate_notify(OWNER_ID, f"⚠ Заказ №{order['id']}: игрок id{uid} уже был {VAMPIRE_TITLE}, оплата повторная — нужен возврат или другая награда.")
+        donate_notify(uid, f"✅ Оплата заказа №{order['id']} принята, но {dup_label} у вас уже есть. Владелец свяжется с вами.")
+        donate_notify(OWNER_ID, f"⚠ Заказ №{order['id']}: у игрока id{uid} уже есть {dup_label}, оплата повторная — нужен возврат или другая награда.")
         return
     donate_notify(uid, f"✅ Оплата принята! Заказ №{order['id']}\n\n{reward}\n\nСпасибо за поддержку! 💛")
     peer = order.get("peer")
@@ -416,7 +444,7 @@ def donate_action(ev, p):
         if uid != p.get("o"):
             return "Это окно открыл другой участник."
         if act == "have":
-            return f"Вы уже {VAMPIRE_TITLE} 🧛"
+            return "Этот питомец уже у вас 🐶" if p.get("k") == "pet" else f"Вы уже {VAMPIRE_TITLE} 🧛"
         if p.get("k") == "pref":
             if donate_blocked(uid):
                 return "🚫 Вам закрыт доступ к донату."
@@ -428,7 +456,7 @@ def donate_action(ev, p):
                 print(f"Не удалось написать игроку {uid} в ЛС: {err_text(e)}")
                 return donate_dm_closed(peer_id, uid)
             return "📩 Инструкция в личных сообщениях."
-        if p.get("k") not in ("vamp", "heal", "virt"):
+        if p.get("k") not in ("vamp", "heal", "virt", "pet"):
             return "Кнопка устарела. Напишите «донат» заново."
         return donate_create(uid, p["k"], chat_peer=peer_id if peer_id >= CHAT_OFFSET else None)
     o = find_order(p.get("id"))                     # кнопки игрока под заказом
@@ -558,7 +586,8 @@ def cmd_donate(msg, rest, slash):
         new, err = donate_prefix_check(tail)
         send(peer_id, err or donate_create(uid, "pref", new, chat_peer))
         return
-    donate_words = {"вампир": "vamp", "vampire": "vamp", "зелье": "heal", "heal": "heal", "вирты": "virt", "virt": "virt"}
+    donate_words = {"вампир": "vamp", "vampire": "vamp", "зелье": "heal", "heal": "heal", "вирты": "virt", "virt": "virt",
+                    "питомец": "pet", "pet": "pet"}
     if word in donate_words:
         send(peer_id, donate_create(uid, donate_words[word], chat_peer=chat_peer))
         return

@@ -20,8 +20,7 @@ from database import count_message, economy, freeze_left, get_level, mute_left
 from donate import build_donate_page, cmd_donate, donate_action, DONATE_KEYS
 from duel import cmd_duel, duel_action
 from extras import (
-    APPEAL_WORDS, cmd_appeal, cmd_safe, cmd_steal, handle_appeal_callback, MENTION_ONLY_RE,
-    safe_action, vampire_mention_steal,
+    APPEAL_WORDS, cmd_appeal, cmd_safe, cmd_steal, handle_appeal_callback, safe_action,
 )
 from fishing import cmd_fishing, fish_action
 from gban import cmd_deputy, cmd_gban, cmd_ungban, gban_guard
@@ -41,6 +40,7 @@ from moderation import (
     cmd_ban, cmd_delete, cmd_freeze, cmd_kick, cmd_mute, cmd_rights, cmd_timeout, cmd_unban,
     cmd_unfreeze, cmd_unmute, cmd_unwarn, cmd_warn, handle_action, timeout_active,
 )
+from pets import cmd_pets, pet_action
 from player import cmd_prefix, cmd_rep_minus, cmd_rep_plus, vip_action
 from referral import check_referral_join, cmd_ref
 from reports_actions import handle_rate_callback, handle_staff_callback
@@ -78,7 +78,7 @@ def handle_callback(ev):
     if cmd == "appeal":               # «Я заполнил(а)» под апелляцией (в беседе и в ЛС)
         handle_appeal_callback(ev, payload)
         return
-    if ev["peer_id"] < CHAT_OFFSET and cmd not in ("shop", "biz", "don", "dpg"):   # всё остальное работает только в беседах (магазин и бизнесы — и в ЛС)
+    if ev["peer_id"] < CHAT_OFFSET and cmd not in ("shop", "biz", "don", "dpg", "pet"):   # всё остальное работает только в беседах (магазин, бизнесы и питомцы — и в ЛС)
         answer_event(ev, "Эта кнопка работает только в беседе.")
         return
 
@@ -90,7 +90,8 @@ def handle_callback(ev):
 
     actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action,
                "roul": roulette_action, "fish": fish_action, "shop": shop_action, "biz": biz_action,
-               "auc": auction_action, "debt": debt_action, "don": donate_action, "safe": safe_action, "ttt": ttt_action}
+               "auc": auction_action, "debt": debt_action, "don": donate_action, "safe": safe_action, "ttt": ttt_action,
+               "pet": pet_action}
     if cmd in actions:
         note = None
         try:
@@ -234,9 +235,6 @@ def handle_message(msg):
     if cmd in BARE_COMMANDS and rest and not slash:
         return
 
-    if not slash and MENTION_ONLY_RE.match(text) and vampire_mention_steal(msg, text):
-        return
-
     if uid == OWNER_ID and cmd in DRONE_WORDS:       # владелец: «дрон вкл / выкл» — режим «беспилотник»
         drone_command(peer_id, rest.split())
         return
@@ -306,6 +304,7 @@ register(("logs", "логи"), cmd_logs)
 register(("бэкап", "backup"), cmd_backup)
 register(("донат", "donate"), cmd_donate)
 register(("укусить", "bite", "украсть", "steal"), cmd_steal)
+register(("питомцы", "питомец", "пит", "pets", "pet"), cmd_pets)
 register(("офиц", "official"), cmd_official)
 register(("сейф", "safe"), cmd_safe)
 register(APPEAL_WORDS, cmd_appeal)

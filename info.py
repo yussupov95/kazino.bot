@@ -11,7 +11,7 @@ from bitcoin import fmt_btc
 from business import kk_text
 from config import (
     ABILITIES_TEXT, BONUS_COOLDOWN, BONUS_EXP, BONUS_MONEY, BTC_UNIT, BUSINESSES, CHAT_RULES,
-    COMMAND_CATEGORIES, err_text, fmt_cmd_block, heal_left, HISTORY_DAYS, HISTORY_PAGES,
+    COMMAND_CATEGORIES, err_text, fmt_cmd_block, heal_left, HISTORY_DAYS, HISTORY_PAGES, PETS, pets_of,
     LEVEL_UP_REWARD, MIN_LEVEL_HELP, MIN_LEVEL_TO_VIEW_PROFILES, OWNER_ID, PLAYER_LEVELS,
     PROMO_TTL, ROLES, STAFF_COMMANDS, TOP_REWARDS, TOP_SIZE, VAMPIRE_TITLE, VIP_BONUS_MONEY,
     VIP_DAYS, VIP_PRICE, WARNS_LIMIT,
@@ -134,6 +134,9 @@ def build_profile(peer_id, uid):
         extra.append(f"✨ VIP до {fmt_time(user['vip_until'])}")
     if user.get("vampire"):
         extra.append(f"🧛 Должность: {VAMPIRE_TITLE}")
+    if pets_of(user):
+        mine = sorted(pets_of(user), key=lambda p: PETS[p]["level"])
+        extra.append("🐾 Питомцы: " + ", ".join(PETS[p]["name"] for p in mine))
     if heal_left(user) > 0:
         extra.append(f"🧪 Зелье лечения до {fmt_time(user['heal_until'])}")
     chat_st = stats.get(str(peer_id), {}).get(str(uid))

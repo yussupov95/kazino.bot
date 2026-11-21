@@ -23,8 +23,6 @@ from player import add_exp
 
 
 # ---------- Вампир ----------
-MENTION_ONLY_RE = re.compile(r"^\[id(\d+)\|[^\]]*\]$")
-
 def balance_leader(peer_id):
     """ID (строкой) игрока на 1 месте в топе беседы по балансу — как в «топ» → «Баланс». Если никого нет — None."""
     best, best_money = None, 0
@@ -36,7 +34,8 @@ def balance_leader(peer_id):
 
 def vampire_steal(msg, victim, quiet=False):
     """Вампир кусает игрока: забирает VAMPIRE_PERCENT% его денег, а у лидера топа по балансу — VAMPIRE_TOP_PERCENT%.
-    quiet — не отвечать на «ошибки новичков» (для упоминаний)."""
+    Только по команде «укусить» / «украсть»: простое @упоминание вампира — это не укус.
+    quiet — не отвечать на «ошибки новичков»."""
     peer_id, uid = msg["peer_id"], msg["from_id"]
     user = get_user(uid)
 
@@ -91,16 +90,6 @@ def vampire_steal(msg, victim, quiet=False):
 def cmd_steal(msg, rest, slash):
     victim, _ = parse_target(msg, rest)
     vampire_steal(msg, victim)
-
-def vampire_mention_steal(msg, text):
-    """Вампир написал одно лишь @упоминание — это тоже кража. Остальных игроков и обычные упоминания не трогаем."""
-    m = MENTION_ONLY_RE.match(text.strip())
-    if not m or not economy["users"].get(str(msg["from_id"]), {}).get("vampire"):
-        return False
-    if msg["from_id"] != OWNER_ID and freeze_left(msg["from_id"]) > 0:
-        return False
-    vampire_steal(msg, int(m.group(1)), quiet=True)
-    return True
 
 # ---------- Бонус «Сейф» ----------
 SAFE_PRIZE = 10_000_000         # выигрыш: 10кк
