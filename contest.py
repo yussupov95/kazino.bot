@@ -7,8 +7,8 @@ import time
 
 from chats import known_chats
 from config import (
-    BROADCAST_DELAY, CONTEST_ACTIVE_DAYS, CONTEST_ENABLED, CONTEST_INTERVAL, CONTEST_REWARD,
-    CONTEST_TTL, err_text,
+    BROADCAST_DELAY, CONTEST_ACTIVE_DAYS, CONTEST_ENABLED, CONTEST_INTERVAL, CONTEST_MIN_MEMBERS,
+    CONTEST_REWARD, CONTEST_TTL, err_text, GROUP_ID, vk,
 )
 from database import economy, get_user, save_economy
 from helpers import fmt_num, get_names, LOCK, mention, send
@@ -16,6 +16,24 @@ from helpers import fmt_num, get_names, LOCK, mention, send
 _active = {}              # peer_id -> {"ans": число, "t": время}
 _running = False
 ANSWER_RE = re.compile(r"^(?:ответ[:\s]*)?=?\s*(-?\d{1,6})\s*$", re.IGNORECASE)
+
+
+_members_cache = {}       # peer_id -> (когда узнали, сколько участников)
+
+
+def chat_members(peer):
+    """Сколько участников в беседе (спрашиваем у VK не чаще раза в час). При сбое — 0: такую беседу пропускаем."""
+    t, n = _members_cache.get(peer, (0, 0))
+    if time.time() - t < 3600:
+        return n
+    try:
+        res = vk.messages.getConversationsById(peer_ids=peer, group_id=GROUP_ID)
+        n = int(res["items"][0]["chat_settings"]["members_count"])
+    except Exception as e:
+        print(f"Конкурс: не удалось узнать число участников {peer}: {err_text(e)}")
+        n = 0
+    _members_cache[peer] = (time.time(), n)
+    return n
 
 
 def make_problem():
@@ -35,6 +53,8 @@ def _run_round():
     global _running
     try:
         for peer in known_chats(CONTEST_ACTIVE_DAYS):
+            if chat_members(peer) < CONTEST_MIN_MEMBERS:
+                continue                                  # маленькие беседы конкурс не получают
             q, ans = make_problem()
             with LOCK:
                 _active[peer] = {"ans": ans, "t": time.time()}

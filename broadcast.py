@@ -4,13 +4,14 @@ import threading
 import time
 
 from chats import known_chats
-from config import BROADCAST_DELAY, err_text, OWNER_ID
+from config import BROADCAST_DELAY, CHAT_OFFSET, err_text, OWNER_ID
 from helpers import msg_photos, send
 
 WORDS = ("рассылка", "broadcast")
 
 
 def _run(text, photos, total_chats):
+    total_chats = [p for p in total_chats if p >= CHAT_OFFSET]      # только беседы, личные сообщения не трогаем
     ok = fail = 0
     for peer in total_chats:
         try:
@@ -38,7 +39,7 @@ def owner_dm_hook(msg):
     if not text and not photos:
         send(OWNER_ID, "ℹ️ Напишите: рассылка ТЕКСТ (можно приложить фото). Сообщение уйдёт во все беседы бота.")
         return True
-    chats = known_chats()
+    chats = [p for p in known_chats() if p >= CHAT_OFFSET]
     if not chats:
         send(OWNER_ID, "⚠ Бот пока не знает ни одной беседы.")
         return True

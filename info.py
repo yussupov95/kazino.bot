@@ -12,7 +12,7 @@ from business import kk_text
 from config import (
     ABILITIES_TEXT, BONUS_COOLDOWN, BONUS_EXP, BONUS_MONEY, BTC_UNIT, BUSINESSES, CHAT_RULES,
     COMMAND_CATEGORIES, err_text, fmt_cmd_block, heal_left, HISTORY_DAYS, HISTORY_PAGES, PETS, pets_of,
-    LEVEL_UP_REWARD, MIN_LEVEL_HELP, MIN_LEVEL_TO_VIEW_PROFILES, OWNER_ID, PLAYER_LEVELS,
+    has_perk, LEVEL_UP_REWARD, MIN_LEVEL_HELP, MIN_LEVEL_TO_VIEW_PROFILES, OWNER_ID, PLAYER_LEVELS,
     PROMO_TTL, ROLES, STAFF_COMMANDS, TOP_REWARDS, TOP_SIZE, VAMPIRE_TITLE, VIP_BONUS_MONEY,
     VIP_DAYS, VIP_PRICE, WARNS_LIMIT,
 )
@@ -100,11 +100,11 @@ def cmd_help(msg, rest, slash):
     peer_id = msg["peer_id"]
     user_id = msg["from_id"]
     level = get_level(peer_id, user_id)
-    if level < MIN_LEVEL_HELP:
+    if level < MIN_LEVEL_HELP and not has_perk(get_user(user_id), "help"):
         send(peer_id, "⛔ Команда доступна модераторам и выше. Список команд: «команды».")
         return
-    # Открываем страницу своей роли, «Вперед» листает остальные
-    text, keyboard = build_help_page(peer_id, level, user_id)
+    # Открываем страницу своей роли, «Вперед» листает остальные (обладатель набора без роли — с первой страницы)
+    text, keyboard = build_help_page(peer_id, max(level, 1), user_id)
     send(peer_id, text, keyboard)
 
 # ---------- «профиль» ----------
@@ -169,7 +169,8 @@ def cmd_profile(msg, rest, slash):
         send(peer_id, "⚠ У сообществ нет профиля.")
         return
 
-    if target != actor and get_level(peer_id, actor) < MIN_LEVEL_TO_VIEW_PROFILES:
+    if (target != actor and get_level(peer_id, actor) < MIN_LEVEL_TO_VIEW_PROFILES
+            and not has_perk(get_user(actor), "profiles")):
         send(peer_id, "⛔ Чужие профили могут смотреть модераторы и выше. "
                       "Свой профиль — команда «профиль».")
         return
@@ -227,10 +228,21 @@ def cmd_bonus(msg, rest, slash):
 
 def cmd_wallet(msg, rest, slash):
     uid = msg["from_id"]
+    # чужой баланс: «баланс» ответом на сообщение / ID / ссылка — модераторам и владельцам наборов «Ультра» и выше
+    other = target_from_text(rest) or target_from_message(msg)
+    if other and other != uid and other > 0:
+        peer_id = msg["peer_id"]
+        if get_level(peer_id, uid) < MIN_LEVEL_TO_VIEW_PROFILES and not has_perk(get_user(uid), "balance"):
+            send(peer_id, "⛔ Чужой баланс могут смотреть модераторы и владельцы набора «Ультра» и выше. "
+                          "Свой баланс — команда «баланс».")
+            return
+        uid = other
+    elif rest.strip() and not slash and not msg.get("reply_message"):
+        return                                       # «баланс опять упал» — обычная фраза
     user = get_user(uid)
     lvl, name, _, hi = player_level(user["exp"])
     lines = [
-        "💳 Кошелёк",
+        "💳 Кошелёк" if uid == msg["from_id"] else f"💳 Кошелёк игрока id{uid}",
         "",
         f"💰 Баланс: {fmt_num(user['money'])}",
         f"⭐ Опыт: {exp_text(user['exp'])}",
@@ -332,9 +344,9 @@ def past_tops_lines(peer_id):
     return lines
 
 def build_history_page(peer_id, page, opener_id):
-    if page == 1 and not vip_active(get_user(opener_id)):
+    if page == 1 and not (vip_active(get_user(opener_id)) or has_perk(get_user(opener_id), "history")):
         lines = ["📜 История: промокоды", "",
-                 "🔒 Список промокодов доступен только VIP-игрокам.",
+                 "🔒 Список промокодов доступен только VIP-игрокам и владельцам наборов.",
                  f"VIP на {VIP_DAYS} дней — {fmt_num(VIP_PRICE)} 💰, команда «купить вип».",
                  "", "Прошлые топы дня доступны всем — кнопка «Вперёд»."]
     elif page == 1:

@@ -55,15 +55,19 @@ def pet_photo(peer_id, pet_id):
 def carousel_json(elements):
     return json.dumps({"type": "carousel", "elements": elements}, ensure_ascii=False)
 
+def pet_cd(user):
+    """Кд кражи питомца: личный (из набора «Премиум» — 2 часа) или общий PET_COOLDOWN."""
+    return int(user.get("pet_cd") or PET_COOLDOWN)
+
 def pets_text(uid):
     user = get_user(uid)
     mine = [PETS[p]["name"] for p in sorted(pets_of(user), key=lambda p: PETS[p]["level"])]
     lines = ["🐾 Питомцы", f"💰 Баланс: {fmt_num(user['money'])}", "",
              "Ваши питомцы: " + (", ".join(mine) if mine else "пока нет"), "",
              "Питомец крадёт часть денег у игрока: в беседе напишите «пит украсть @имя» (или ответом на сообщение).",
-             f"Кд — раз в {PET_COOLDOWN // 3600} ч. Красть можно у игрока без питомца или со слабее питомцем. "
-             "У Вампиров красть нельзя."]
-    left = user.get("pet_steal_t", 0) + PET_COOLDOWN - time.time()
+             f"Кд — раз в {fmt_duration(pet_cd(user))}. Красть можно у игрока без питомца или со слабее питомцем, "
+             "в том числе у Вампиров."]
+    left = user.get("pet_steal_t", 0) + pet_cd(user) - time.time()
     if mine and left > 0:
         lines += ["", f"⏳ Следующая кража через {fmt_duration(left)}."]
     return "\n".join(lines)
@@ -195,16 +199,13 @@ def pet_steal(msg, victim):
     if victim in VAMPIRE_IMMUNE:
         send(peer_id, "🛡 У этого игрока иммунитет.")
         return
-    left = user.get("pet_steal_t", 0) + PET_COOLDOWN - time.time()
+    left = user.get("pet_steal_t", 0) + pet_cd(user) - time.time()
     if left > 0:
         send(peer_id, f"🐾 Питомец ещё отдыхает. Следующая кража через {fmt_duration(left)}.")
         return
     target = economy["users"].get(str(victim))
     if not target or str(victim) not in stats.get(str(peer_id), {}):
         send(peer_id, "🐾 Не нашёл такого игрока в этой беседе.")
-        return
-    if target.get("vampire"):
-        send(peer_id, "🧛 У Вампиров красть нельзя.")
         return
     victim_pet_id = best_pet(target)
     if victim_pet_id and PETS[victim_pet_id]["level"] >= pet["level"]:
@@ -225,7 +226,7 @@ def pet_steal(msg, victim):
     names = get_names([uid, victim])
     send(peer_id, f"🐾 Питомец «{pet['name']}» игрока {mention(uid, names)} стащил у {mention(victim, names)} "
                   f"{fmt_num(amount)} 💰 ({fmt_pct(percent)}% баланса).\n"
-                  f"Следующая кража — через {PET_COOLDOWN // 3600} ч.")
+                  f"Следующая кража — через {fmt_duration(pet_cd(user))}.")
 
 def cmd_pets(msg, rest, slash):
     """«питомцы» / «питомец» / «пит»: магазин и ваши питомцы (присылается в ЛС).

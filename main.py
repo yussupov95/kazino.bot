@@ -13,6 +13,7 @@ from auction import prune_auction
 from backup import notify_owner_startup
 from broadcast import owner_dm_hook
 from bitcoin import check_btc_market
+from check import check_dm_hook
 from contest import check_contest
 from config import (
     _asset, BTC_IMAGE, BUSINESSES, CHAT_OFFSET, DONATE_QR_FILE, err_text, _find, GROUP_ID,
@@ -36,7 +37,8 @@ from shop import (
     ART_VERSION, CHAR_FILES, cleanup_removed_items, ensure_art_version, reset_staff_looks,
     SHOP_ITEMS,
 )
-from ttt import check_new_games
+from crash import check_crash_games
+from mines import check_idle_mines
 
 
 # ---------- Таймеры (дуэли, рулетка) ----------
@@ -49,7 +51,8 @@ def tick_loop():
                 check_duel_timers()
                 check_roulette_reveals()
                 check_stuck_games()
-                check_new_games()           # краш, крестики-нолики, зависшие «Мины»
+                check_crash_games()         # краш
+                check_idle_mines()          # зависшие «Мины»
                 check_report_dialogs()
                 prune_promos()
                 prune_auction()
@@ -114,7 +117,7 @@ def main():
                                 if msg["peer_id"] >= CHAT_OFFSET:
                                     handle_message(msg)
                                 else:
-                                    if not owner_dm_hook(msg):   # «рассылка» владельца
+                                    if not (owner_dm_hook(msg) or check_dm_hook(msg)):   # «рассылка» и «чек подтвердить / отказать» владельца
                                         handle_dm(msg)       # личка: репорты
                             elif event.type == VkBotEventType.MESSAGE_EVENT:
                                 handle_callback(event.obj)

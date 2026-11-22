@@ -55,7 +55,8 @@ def vampire_steal(msg, victim, quiet=False):
     if victim in VAMPIRE_IMMUNE:
         say("🛡 У этого игрока иммунитет к вампирам.")
         return
-    left = user.get("last_steal", 0) + VAMPIRE_COOLDOWN - time.time()
+    cd = int(user.get("vamp_cd") or VAMPIRE_COOLDOWN)          # у набора «Премиум» кд полчаса
+    left = user.get("last_steal", 0) + cd - time.time()
     if left > 0:
         say(f"🧛 Вы ещё сыты. Следующий укус через {fmt_duration(left)}.")
         return
@@ -85,7 +86,7 @@ def vampire_steal(msg, victim, quiet=False):
             f"({fmt_pct(percent)}% баланса).")
     if is_leader:
         text += f"\n👑 {mention(victim, names)} на 1 месте в топе по балансу — его кусают только на {fmt_pct(VAMPIRE_TOP_PERCENT)}%."
-    send(peer_id, text + f"\nСледующий укус — через {VAMPIRE_COOLDOWN // 3600} ч.")
+    send(peer_id, text + f"\nСледующий укус — через {fmt_duration(cd)}.")
 
 def cmd_steal(msg, rest, slash):
     victim, _ = parse_target(msg, rest)

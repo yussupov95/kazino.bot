@@ -5,7 +5,7 @@ import time
 
 from config import (
     err_text, _here, OWNER_AMOUNT_RE, OWNER_ID, TRANSFER_ALERT_PAIR, TRANSFER_COOLDOWN,
-    TRANSFER_DAILY_LIMIT, TRANSFER_MAX, TRANSFER_MIN, TRANSFER_RECEIVE_LIMIT,
+    TRANSFER_DAILY_LIMIT, TRANSFER_MAX, TRANSFER_MIN, TRANSFER_PAIR_LIMIT, TRANSFER_RECEIVE_LIMIT,
 )
 from database import economy, get_user, save_economy, today_str, vip_active
 from helpers import (
@@ -23,6 +23,7 @@ def _add_day_total(user, key_day, key_sum, amount):
     user[key_sum] = _day_total(user, key_day, key_sum) + amount
     user[key_day] = today_str()
 
+_MAX_BALANCE = 9 * 10 ** 18          # в базе (SQLite) число не может быть больше ~9,2 квинтиллиона
 _GUARD_FILE = _here("transfer_guard.json")
 _pair_totals = {}     # {"день": {"отправитель>получатель": сумма}} — переживает перезапуск
 
@@ -73,7 +74,8 @@ def cmd_transfer(msg, rest, slash):
     usage = (f"ℹ️ Использование: передать СУММА — ответом на сообщение участника\n"
              f"Или: передать ID СУММА\n"
              f"Сумма: от {fmt_num(TRANSFER_MIN)} до {fmt_num(TRANSFER_MAX)} 💰\n"
-             f"Всего за сутки можно передать: {fmt_num(TRANSFER_DAILY_LIMIT)} 💰\n"
+             f"Всего за сутки можно передать: {fmt_num(TRANSFER_DAILY_LIMIT)} 💰, "
+             f"одному игроку — не больше {fmt_num(TRANSFER_PAIR_LIMIT)} 💰\n"
              f"Пауза между переводами: {TRANSFER_COOLDOWN} сек. (у VIP паузы нет)")
     target, tail = parse_target(msg, rest)
     if target is None:
@@ -103,12 +105,22 @@ def cmd_transfer(msg, rest, slash):
             send(peer_id, f"⏳ Следующий перевод через {fmt_duration(left)}. "
                           "У VIP-игроков паузы нет — «купить вип».")
             return
-    if sender["money"] < amount:
+    if not is_owner and sender["money"] < amount:       # владелец переводит сколько угодно: баланс не нужен и не списывается
         send(peer_id, f"⚠ Недостаточно денег. Ваш баланс: {fmt_num(sender['money'])} 💰")
+        return
+    if is_owner and get_user(target)["money"] + amount > _MAX_BALANCE:
+        send(peer_id, f"⚠ У получателя баланс не может быть больше {fmt_num(_MAX_BALANCE)} 💰 (предел базы данных).")
         return
 
     # --- защита экономики: суточные лимиты (владельца не касаются) ---
     track_recv = not is_owner and target != OWNER_ID
+    if not is_owner:                                    # одному и тому же игроку — не больше TRANSFER_PAIR_LIMIT за сутки
+        pair_sent = _pair_totals.get(today_str(), {}).get(f"{uid}>{target}", 0)
+        if TRANSFER_PAIR_LIMIT > 0 and pair_sent + amount > TRANSFER_PAIR_LIMIT:
+            can = max(0, TRANSFER_PAIR_LIMIT - pair_sent)
+            send(peer_id, f"⛔ Одному и тому же игроку можно передать не больше {fmt_num(TRANSFER_PAIR_LIMIT)} 💰 в сутки. "
+                          f"Этому игроку вы уже передали {fmt_num(pair_sent)} 💰, можно ещё {fmt_num(can)} 💰.")
+            return
     if not is_owner and TRANSFER_DAILY_LIMIT > 0:
         sent_today = _day_total(sender, "tr_day", "tr_sent")
         if sent_today + amount > TRANSFER_DAILY_LIMIT:
@@ -126,7 +138,8 @@ def cmd_transfer(msg, rest, slash):
             return
 
     receiver = get_user(target)
-    sender["money"] -= amount
+    if not is_owner:
+        sender["money"] -= amount
     receiver["money"] += amount
     sender["last_transfer"] = now
     if not is_owner:

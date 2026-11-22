@@ -4,18 +4,19 @@ import re
 import time
 
 from config import (
-    err_text, FREEZE_FOREVER, MAX_DELETE_AT_ONCE, MAX_MUTE_SECONDS, MAX_TIMEOUT_MINUTES,
+    err_text, FREEZE_FOREVER, has_perk, MAX_DELETE_AT_ONCE, MAX_MUTE_SECONDS, MAX_TIMEOUT_MINUTES,
     MIN_LEVEL_TO_DELETE, MIN_LEVEL_TO_FREEZE, MIN_LEVEL_TO_GRANT, MIN_LEVEL_TO_KICK,
     MIN_LEVEL_TO_MUTE, MIN_LEVEL_TO_TIMEOUT, MIN_LEVEL_TO_UNWARN, MIN_LEVEL_TO_WARN, OWNER_ID,
     REPORT_STAFF_TITLE, ROLES, TIME_UNITS, vk, WARNS_LIMIT,
 )
 from database import (
-    get_level, get_warns, mute_user, punish, save_punish, set_level, unmute_user,
+    get_level, get_user, get_warns, mute_user, punish, save_punish, set_level, unmute_user,
 )
 from helpers import (
     check_punish_target, delete_message, deny, extract_target, fmt_duration, fmt_time,
-    get_names, kick_from_chat, mention, parse_target, send,
+    get_names, kick_from_chat, LINK_RE, mention, outranks, parse_target, send,
 )
+from config import MENTION_RE
 from extras import appeal_keyboard
 from logs import log_action
 from referral import check_referral_join
@@ -217,7 +218,7 @@ def cmd_delete(msg, rest, slash):
     blocked = 0
     for m in candidates:
         author = m.get("from_id", 0)
-        if author != actor and get_level(peer_id, author) >= level:
+        if author != actor and not outranks(peer_id, actor, author, level):
             blocked += 1
             continue
         cmids.append(m["conversation_message_id"])
@@ -267,14 +268,16 @@ def cmd_rights(msg, rest, slash):
         return
 
     m = re.match(r"(\d+)\s*(.*)", rest, re.S)
-    if not m:
+    mt = re.match(r"(\S+)\s+(\d)\s*$", rest.strip())      # «права https://vk.ru/name 1» / «права @имя 2»
+    if mt and (LINK_RE.match(mt.group(1)) or MENTION_RE.match(mt.group(1))):
+        level, target_text = int(mt.group(2)), mt.group(1)
+    elif m:
+        level, target_text = int(m.group(1)), m.group(2)
+    else:
         # Без слеша молчим, чтобы не реагировать на фразы вроде «права водителя…»
         if slash:
             send(peer_id, rights_usage())
         return
-
-    level = int(m.group(1))
-    target_text = m.group(2)
 
     actor_level = get_level(peer_id, actor)
     if actor_level < MIN_LEVEL_TO_GRANT:
@@ -296,7 +299,7 @@ def cmd_rights(msg, rest, slash):
     if target == actor:
         send(peer_id, "⛔ Нельзя менять права самому себе.")
         return
-    if get_level(peer_id, target) >= actor_level:
+    if not outranks(peer_id, actor, target, actor_level):
         send(peer_id, "⛔ Нельзя менять права пользователя с таким же или более высоким уровнем.")
         return
     if level >= actor_level:
@@ -331,6 +334,9 @@ def cmd_warn(msg, rest, slash):
     err = check_punish_target(peer_id, actor, level, target)
     if err:
         send(peer_id, err)
+        return
+    if actor != OWNER_ID and has_perk(get_user(target), "warn_immune"):
+        send(peer_id, "🛡 У этого игрока иммунитет от варна.")
         return
     reason = reason[:200] or "не указана"
     warns = punish["warns"].setdefault(str(peer_id), {}).setdefault(str(target), [])

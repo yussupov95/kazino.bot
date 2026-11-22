@@ -3,20 +3,20 @@
 import json
 import re
 
-from antiabuse import freeze_reason_text
 from auction import auction_action, cmd_auction
 from backup import cmd_backup
 from bank import cmd_bank
 from bitcoin import cmd_btc, cmd_buy, cmd_sell
 from business import biz_action, cmd_biz, cmd_income
+from check import check_callback, cmd_check
 from config import (
     BARE_COMMANDS, BOT_MENTION_RE, CHAT_OFFSET, COMMAND_CATEGORIES, DRONE_WORDS, err_text,
-    HISTORY_PAGES, MIN_LEVEL_HELP, OWNER_ID, ROLES,
+    has_perk, HISTORY_PAGES, MIN_LEVEL_HELP, OWNER_ID, ROLES,
 )
 from contest import contest_try_answer
 from crash import cmd_crash
 from debt import cmd_debt_give, cmd_debt_return, cmd_debts, debt_action
-from database import count_message, economy, freeze_left, get_level, mute_left
+from database import count_message, economy, freeze_left, get_level, get_user, mute_left
 from donate import build_donate_page, cmd_donate, donate_action, DONATE_KEYS
 from duel import cmd_duel, duel_action
 from extras import (
@@ -40,6 +40,7 @@ from moderation import (
     cmd_ban, cmd_delete, cmd_freeze, cmd_kick, cmd_mute, cmd_rights, cmd_timeout, cmd_unban,
     cmd_unfreeze, cmd_unmute, cmd_unwarn, cmd_warn, handle_action, timeout_active,
 )
+from owner_cmds import cmd_owner_grant, cmd_owner_take
 from pets import cmd_pets, pet_action
 from player import cmd_prefix, cmd_rep_minus, cmd_rep_plus, vip_action
 from referral import check_referral_join, cmd_ref
@@ -54,7 +55,6 @@ from staff_money import (
 )
 from transfer import cmd_transfer
 from wipe import cmd_restore_account, wipe_callback
-from ttt import cmd_ttt, ttt_action, ttt_text_move
 
 
 # ---------- Листалка (общая для «админы» и «хелп») ----------
@@ -69,6 +69,9 @@ def handle_callback(ev):
         return
     if cmd == "appr":                 # разрешения владельца (деньги, промокоды, опыт)
         handle_approval_callback(ev, payload)
+        return
+    if cmd == "chk":                  # чеки: владелец подтверждает / отказывает в ЛС
+        check_callback(ev, payload)
         return
     if cmd == "rs":                   # кнопки следящего за репортами в ЛС
         handle_staff_callback(ev, payload)
@@ -94,7 +97,7 @@ def handle_callback(ev):
 
     actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action,
                "roul": roulette_action, "fish": fish_action, "shop": shop_action, "biz": biz_action,
-               "auc": auction_action, "debt": debt_action, "don": donate_action, "safe": safe_action, "ttt": ttt_action,
+               "auc": auction_action, "debt": debt_action, "don": donate_action, "safe": safe_action,
                "pet": pet_action}
     if cmd in actions:
         note = None
@@ -114,7 +117,7 @@ def handle_callback(ev):
     if uid != payload.get("o", payload.get("opener")):
         answer_event(ev, f"Это окно открыл другой участник. Напишите «{PAGER_WORDS[cmd]}» сами.")
         return
-    if cmd == "help" and get_level(peer_id, uid) < MIN_LEVEL_HELP:
+    if cmd == "help" and get_level(peer_id, uid) < MIN_LEVEL_HELP and not has_perk(get_user(uid), "help"):
         answer_event(ev, "Эта команда доступна только модераторам и выше.")
         return
     if payload.get("n"):              # открытая вкладка / счётчик страниц
@@ -155,7 +158,6 @@ TWO_WORD_COMMANDS = {
     ("курс", "бит"): "бит",
     ("курс", "биткоин"): "биткоин",
     ("курс", "btc"): "btc",
-    ("крестики", "нолики"): "крно",
     ("права", "зам"): "зам_чата",
     ("права", "заместитель"): "зам_чата",
     ("права", "замчата"): "зам_чата",
@@ -242,14 +244,12 @@ def handle_message(msg):
     if uid == OWNER_ID and cmd in DRONE_WORDS:       # владелец: «дрон вкл / выкл» — режим «беспилотник»
         drone_command(peer_id, rest.split())
         return
-    if cmd == "ход" and rest and (uid == OWNER_ID or freeze_left(uid) <= 0) and ttt_text_move(msg, rest):
-        return                                         # «ход 5» — ход в крестики-нолики без кнопок
 
     handler = HANDLERS.get(cmd)
     if handler:
         left = freeze_left(uid) if uid != OWNER_ID else 0
         if left > 0:  # заморозка: все команды недоступны
-            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате." + freeze_reason_text(uid))
+            send(peer_id, f"🧊 Ваши команды заморожены {freeze_text(left)}. Можно только общаться в чате.")
             return
         if drone_guard(msg, cmd, rest, slash):         # кнопки сейчас не работают — игру не начинаем
             return
@@ -321,8 +321,10 @@ register(("штраф", "fine"), cmd_fine)
 register(("-норма",), cmd_norm_minus)
 register(("+норма",), cmd_norm_plus)
 register(("+перенорма",), cmd_renorm)
+register(("выдать", "give"), cmd_owner_grant)
+register(("отобрать",), cmd_owner_take)
 register(("долг_дать",), cmd_debt_give)
 register(("долг_вернуть",), cmd_debt_return)
 register(("долги", "debts"), cmd_debts)
 register(("краш", "crash"), cmd_crash)
-register(("крно", "ttt", "крестики"), cmd_ttt)
+register(("чек", "check"), cmd_check)

@@ -164,11 +164,48 @@ def parse_amount(text, balance=None, regex=None):
     value = int(Decimal(m.group(1).replace(",", ".")) * (1000 ** len(suffix)))   # «мм» = «кк», «ммм» = «ккк»
     return value if value > 0 else None
 
+# ---------- Ссылки VK: vk.com/id123, vk.ru/borz_yussupov, https://m.vk.com/club1 ----------
+LINK_RE = re.compile(r"(?:https?://)?(?:m\.)?vk\.(?:com|ru)/([A-Za-z0-9_.]+)(?:[/?#]\S*)?", re.IGNORECASE)
+_link_cache = {}
+
+def resolve_vk_link(text):
+    """Ссылка на страницу VK → ID (для сообщества — отрицательный). Нет ссылки или страница не найдена — None."""
+    m = LINK_RE.search(text or "")
+    if not m:
+        return None
+    name = m.group(1).rstrip(".")
+    low = name.lower()
+    mm = re.fullmatch(r"id(\d+)", low)
+    if mm:
+        return int(mm.group(1))
+    mm = re.fullmatch(r"(?:club|public|event)(\d+)", low)
+    if mm:
+        return -int(mm.group(1))
+    if low in _link_cache:
+        return _link_cache[low]
+    try:
+        res = vk.utils.resolveScreenName(screen_name=name)
+    except Exception as e:
+        print(f"Не удалось разобрать ссылку {name}: {err_text(e)}")
+        return None
+    uid = None
+    if res and res.get("object_id"):
+        if res.get("type") == "user":
+            uid = int(res["object_id"])
+        elif res.get("type") in ("group", "page", "event"):
+            uid = -int(res["object_id"])
+    if uid is not None:
+        _link_cache[low] = uid
+    return uid
+
 def target_from_text(text):
-    """ID или упоминание в тексте команды."""
+    """ID, упоминание или ссылка VK в тексте команды."""
     m = MENTION_RE.search(text)
     if m:
         return int(m.group(1))
+    link = resolve_vk_link(text)
+    if link is not None:
+        return link
     m = ID_RE.search(text)
     if m:
         return int(m.group(1))
@@ -196,9 +233,23 @@ def parse_target(msg, rest):
     m = re.match(r"\[id(\d+)\|[^\]]*\]\s*(.*)", rest, re.S)
     if m:
         return int(m.group(1)), m.group(2).strip()
+    m = LINK_RE.match(rest)                       # ссылка VK в начале: «vk.ru/name 5кк»
+    if m:
+        uid = resolve_vk_link(m.group(0))
+        if uid is not None:
+            return uid, rest[m.end():].strip()
     from_msg = target_from_message(msg)
     if from_msg is not None:
         return from_msg, rest
+    # ссылка или @упоминание не в начале: «деньги 5000 https://vk.ru/name» (раньше, чем «число в начале = ID»)
+    m = LINK_RE.search(rest)
+    if m:
+        uid = resolve_vk_link(m.group(0))
+        if uid is not None:
+            return uid, (rest[:m.start()] + " " + rest[m.end():]).strip()
+    m = MENTION_RE.search(rest)
+    if m:
+        return int(m.group(1)), (rest[:m.start()] + " " + rest[m.end():]).strip()
     m = re.match(r"(?:id)?(\d+)(?=\s|$)\s*(.*)", rest, re.S)
     if m:
         return int(m.group(1)), m.group(2).strip()
@@ -218,9 +269,23 @@ def check_punish_target(peer_id, actor, level, target):
         return "⛔ Владельца трогать нельзя."
     if target == actor:
         return "⛔ Нельзя применить это к самому себе."
-    if get_level(peer_id, target) >= level:
+    if not outranks(peer_id, actor, target, level):
         return "⛔ Нельзя применить это к пользователю с таким же или более высоким уровнем."
     return None
+
+def outranks(peer_id, actor, target, actor_level=None):
+    """True — actor старше target. Гл.Следящий Зам (ранг 50) старше Зама чата и всех ниже;
+    Зама чата и Гл.Следящего Зама остальные роли по-прежнему считаются как Администратор."""
+    from database import is_gl_deputy, raw_level
+    if actor == OWNER_ID:
+        return True
+    if is_gl_deputy(peer_id, target):
+        return False                    # выше Гл.Следящего Зама — только Владелец
+    if is_gl_deputy(peer_id, actor):
+        return True
+    if actor_level is None:
+        actor_level = get_level(peer_id, actor)
+    return get_level(peer_id, target) < actor_level
 
 # ---------- Листалка (общая для «админы» и «хелп») ----------
 def nav_keyboard(cmd, page, first, last, opener_id, middle=None):

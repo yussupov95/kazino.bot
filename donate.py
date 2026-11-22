@@ -10,16 +10,17 @@ from config import (
     CHAT_OFFSET, DONATE_BOT_LINK, DONATE_CARD, DONATE_CARD_BANK, DONATE_CREATE_COOLDOWN,
     DONATE_ITEMS, DONATE_MAX_RECEIPTS, DONATE_MAX_WAIT, DONATE_OPEN_TTL, DONATE_PREFIX_BANNED,
     DONATE_PET_ID, DONATE_PREFIX_MAX, DONATE_QR_FILE, err_text, fmt_pct, give_pet, HEAL_DAYS,
-    has_pet, heal_left, OWNER_ID, PET_COOLDOWN, PETS, VAMPIRE_COOLDOWN, VAMPIRE_PERCENT,
-    VAMPIRE_TITLE, VAMPIRE_TOP_PERCENT, vk_upload,
+    has_pet, heal_left, OWNER_ID, PACK_KEYS, PACK_WORDS, PACKS, PERK_TITLES, PET_COOLDOWN, PETS,
+    VAMPIRE_COOLDOWN, VAMPIRE_PERCENT, VAMPIRE_TITLE, VAMPIRE_TOP_PERCENT, VIP_DAYS, VIP_PREFIX, vk_upload,
 )
-from database import economy, get_user, save_economy
+from database import economy, get_user, save_economy, vip_active
 from helpers import (
     active_dialog_of, edit_message, fmt_duration, fmt_num, fmt_time, get_names, mention,
     msg_photos, send, send_dm,
 )
 from logs import log_action
-from player import sanitize_prefix
+from player import add_exp, sanitize_prefix
+from shop import SHOP_ITEMS
 
 
 # ---------- Донат: оплата через Сбер, проверка владельцем ----------
@@ -84,7 +85,7 @@ def donate_card(order, text, kb, attachment=None):
     order["cmid"], order["dm_text"] = cmid, text
     save_economy()
 
-DONATE_KEYS = ("vamp", "heal", "virt", "pref", "pet")      # порядок привилегий в «донат»
+DONATE_KEYS = ("vamp", "heal", "virt", "pref", "pet") + PACK_KEYS      # порядок привилегий в «донат»
 
 def strike(text):
     """Зачёркнутый текст. VK не понимает разметку, поэтому после каждого символа ставится «перечёркивание»."""
@@ -113,6 +114,9 @@ def donate_details(key):
             "• не сработает на игрока с зельем лечения",
             "• покупается один раз, без срока действия",
         ]
+    if key in PACKS:
+        return ["Что внутри:"] + ["• " + l for l in pack_lines(key)] + ["", "• всё выдаётся сразу после подтверждения оплаты",
+                                                                      "• можно купить повторно"]
     if key == "heal":
         return [
             "Что это: зелье, которое лечит от укусов Вампиров.",
@@ -141,7 +145,7 @@ def donate_details(key):
             f"• забирает {fmt_pct(pet['percent'])}% баланса игрока",
             f"• кд: раз в {PET_COOLDOWN // 3600} ч.",
             "• красть можно у игрока без такого же питомца и без питомца сильнее",
-            "• у Вампиров красть нельзя",
+            "• питомец может красть и у Вампиров",
             "• покупается один раз, без срока действия",
             "• посмотреть всех питомцев с фото: «питомцы»",
         ]
@@ -169,7 +173,7 @@ def build_donate_page(peer_id, page, opener_id):
                   "Для ЛС бот должен уметь вам писать: если не приходит — напишите ему первым в личку."]
         kb = VkKeyboard(inline=True)
         for i, key in enumerate(DONATE_KEYS, 1):
-            if i > 1:
+            if i > 1 and (i - 1) % 2 == 0:
                 kb.add_line()
             kb.add_callback_button(DONATE_ITEMS[key]["title"][:40], VkKeyboardColor.PRIMARY,
                                    {"cmd": "dpg", "p": i, "o": opener_id})
@@ -344,6 +348,58 @@ def donate_mark_paid(order):
     log_action(order.get("peer") or order["uid"], order["uid"], f"донат: оплата заказа №{order['id']} на проверке")
     return None
 
+def pack_lines(key):
+    """Что входит в набор — списком строк (для витрины и для сообщения о награде)."""
+    from config import BUSINESSES
+    pk = PACKS[key]
+    lines = [f"💰 {fmt_num(pk['money'])} игровых денег"]
+    if pk.get("exp"):
+        lines.append(f"⭐ {pk['exp']} exp")
+    lines.append(f"🎭 Персонаж для профиля: {SHOP_ITEMS[pk['char']][1]}")
+    if pk.get("pets"):
+        lines.append("🐾 Питомцы: " + ", ".join(PETS[p]["name"] for p in pk["pets"]))
+    if pk.get("biz"):
+        lines.append("🏢 Бизнесы: " + ", ".join(BUSINESSES[b]["name"] for b in pk["biz"]))
+    if pk.get("perks"):
+        lines.append("🔓 Доступ: " + ", ".join(PERK_TITLES[x] for x in pk["perks"]))
+    if pk.get("vip"):
+        lines.append(f"✨ VIP на {VIP_DAYS} дней")
+    if pk.get("vamp_cd"):
+        lines.append(f"🧛 Кд укуса вампира: {fmt_duration(pk['vamp_cd'])}")
+    if pk.get("pet_cd"):
+        lines.append(f"🐾 Кд кражи питомца: {fmt_duration(pk['pet_cd'])}")
+    return lines
+
+def give_pack(uid, key):
+    """Выдаёт содержимое набора игроку. Можно вызывать и из команды владельца."""
+    pk = PACKS[key]
+    user = get_user(uid)
+    user["money"] += pk["money"]
+    if pk.get("exp"):
+        add_exp(uid, pk["exp"])
+    items = user.setdefault("items", [])
+    if pk["char"] not in items:
+        items.append(pk["char"])
+    user.setdefault("equip", {})["char"] = pk["char"]
+    for pet_id in pk.get("pets", []):
+        give_pet(user, pet_id)
+    for biz in pk.get("biz", []):
+        user.setdefault("biz", {}).setdefault(biz, time.time())
+    if pk.get("perks"):
+        user["perks"] = sorted(set(user.get("perks") or []) | set(pk["perks"]))
+    if pk.get("vip"):
+        now = time.time()
+        base = user["vip_until"] if vip_active(user) else now
+        user["vip"] = True
+        user["vip_until"] = base + VIP_DAYS * 86400
+        if user.get("prefix", "") in ("", "VIP✨", VIP_PREFIX):
+            user["prefix"] = VIP_PREFIX
+    if pk.get("vamp_cd"):
+        user["vamp_cd"] = pk["vamp_cd"]
+    if pk.get("pet_cd"):
+        user["pet_cd"] = pk["pet_cd"]
+    return user
+
 def donate_finish(order):
     """Оплата подтверждена: выдаёт награду (строго один раз) и сообщает игроку и в беседу."""
     if order.get("status") == "paid":
@@ -359,6 +415,10 @@ def donate_finish(order):
         give_pet(user, DONATE_PET_ID)
         reward = (f"🐶 Теперь у вас питомец «{pet['name']}»! Раз в {PET_COOLDOWN // 3600} ч. он может украсть {fmt_pct(pet['percent'])}% баланса игрока.\n"
                   "Команда: «пит украсть» (ответом на сообщение игрока) или «пит украсть @имя». Все питомцы: «питомцы».")
+    elif key in PACKS:
+        give_pack(uid, key)
+        reward = f"{PACKS[key]['title']} получен! Вам выдано:\n" + "\n".join("• " + l for l in pack_lines(key)) + \
+                 "\nПерсонаж уже надет — посмотреть: «профиль»."
     elif key == "vamp":
         duplicate = bool(user.get("vampire"))
         user["vampire"] = True
@@ -456,7 +516,7 @@ def donate_action(ev, p):
                 print(f"Не удалось написать игроку {uid} в ЛС: {err_text(e)}")
                 return donate_dm_closed(peer_id, uid)
             return "📩 Инструкция в личных сообщениях."
-        if p.get("k") not in ("vamp", "heal", "virt", "pet"):
+        if p.get("k") not in ("vamp", "heal", "virt", "pet") + PACK_KEYS:
             return "Кнопка устарела. Напишите «донат» заново."
         return donate_create(uid, p["k"], chat_peer=peer_id if peer_id >= CHAT_OFFSET else None)
     o = find_order(p.get("id"))                     # кнопки игрока под заказом
@@ -588,6 +648,14 @@ def cmd_donate(msg, rest, slash):
         return
     donate_words = {"вампир": "vamp", "vampire": "vamp", "зелье": "heal", "heal": "heal", "вирты": "virt", "virt": "virt",
                     "питомец": "pet", "pet": "pet"}
+    if word in ("набор", "наборы", "pack", "packs"):
+        key = PACK_WORDS.get(tail.strip().lower().replace("ё", "е").replace("набор ", ""))
+        if key:
+            send(peer_id, donate_create(uid, key, chat_peer=chat_peer))
+        else:
+            send(peer_id, "ℹ️ Наборы: донат набор новичка (50 ₽) · вип (100 ₽) · ультра (150 ₽) · премиум (200 ₽)\n"
+                          "Подробности — в меню «донат».")
+        return
     if word in donate_words:
         send(peer_id, donate_create(uid, donate_words[word], chat_peer=chat_peer))
         return
