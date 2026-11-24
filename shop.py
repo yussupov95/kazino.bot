@@ -10,7 +10,7 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 from vk_api.utils import get_random_id
 
 from config import (
-    CHAT_OFFSET, err_text, _find, GROUP_ID, OWNER_ID, ROULETTE_CACHE_DIR, vk, vk_upload,
+    CHAT_OFFSET, err_text, _find, GROUP_ID, OWNER_ID, PACKS, ROULETTE_CACHE_DIR, vk, vk_upload,
 )
 from database import data, economy, get_user, save_economy
 from helpers import answer_event, delete_message, edit_message, fmt_num, send, send_get_cmid
@@ -65,6 +65,12 @@ SECRET_ITEMS = {"char3"}
 GIF_ITEMS = {"char4", "char8", "char12", "char20"}
 # убранные из магазина: не продаются, но у купивших остаются и ходят по аукциону
 PACK_ITEMS = {"char13", "char14", "char15", "char16", "char17", "char18", "char19", "char20"}   # персонажи из донат-наборов: в магазине не продаются
+# Какой персонаж выдаёт каждый донат-набор. Задаётся ЗДЕСЬ и перекрывает "char" из PACKS в config.py:
+# так наборы выдают char17–char20, даже если в config.py остались старые char13–char16 (у них нет картинок).
+PACK_CHARS = {"pack1": "char17", "pack2": "char18", "pack3": "char19", "pack4": "char20"}
+for _pack, _char in PACK_CHARS.items():
+    if _pack in PACKS:
+        PACKS[_pack]["char"] = _char
 RETIRED_ITEMS = {"char1", "char2", "char3", "char4", "char5", "char6", "char7", "char8"} | PACK_ITEMS
 # товары, которые продаются, только когда их файл лежит рядом с ботом
 FILE_REQUIRED = SECRET_ITEMS | GIF_ITEMS | {"char9", "char10", "char11"}
@@ -261,11 +267,20 @@ def cached_doc(peer_id, path, name, title):
 def avatar_attachment(peer_id, uid):
     """Картинка профиля: купленный персонаж (гифка — анимацией). Нет персонажа — профиль без картинки."""
     cur = get_user(uid).get("equip", {}).get("char")
-    if cur in GIF_ITEMS and cur in CHAR_FILES and os.path.exists(_find(CHAR_FILES[cur])):
+    if not cur:
+        return None                                   # персонаж не надет — профиль без картинки
+    if cur not in CHAR_FILES:
+        print(f"Профиль {uid}: у надетого «{cur}» нет записи в CHAR_FILES — картинки не будет")
+        return None
+    if not os.path.exists(_find(CHAR_FILES[cur])):
+        print(f"Профиль {uid}: надет «{cur}», но файла {CHAR_FILES[cur]} нет рядом с ботом (искал {_find(CHAR_FILES[cur])})")
+        return None
+    if cur in GIF_ITEMS:
         return cached_doc(peer_id, _find(CHAR_FILES[cur]), f"avatar_{cur}_v{ART_SIG}", "Персонаж")
-    if cur in CHAR_FILES and os.path.exists(char_path(cur)):
-        return cached_photo(peer_id, char_path(cur), f"avatar_{cur}_v{ART_SIG}")
-    return None
+    att = cached_photo(peer_id, char_path(cur), f"avatar_{cur}_v{ART_SIG}")
+    if not att:
+        print(f"Профиль {uid}: не удалось загрузить картинку «{cur}» ({CHAR_FILES[cur]}) в VK")
+    return att
 
 def shop_buy(peer_id, uid, item_id):
     slot, name, _, _ = SHOP_ITEMS[item_id]
