@@ -14,6 +14,7 @@ from backup import notify_owner_startup
 from broadcast import owner_dm_hook
 from bitcoin import check_btc_market
 from check import check_dm_hook
+from clan import check_clan_battles, clan_dm_hook
 from contest import check_contest
 from config import (
     _asset, BTC_IMAGE, BUSINESSES, CHAT_OFFSET, DONATE_QR_FILE, err_text, _find, GROUP_ID,
@@ -60,6 +61,7 @@ def tick_loop():
                 check_btc_market()
                 check_contest()
                 check_debts()
+                check_clan_battles()        # турниры кланов 2 раза в день
         except Exception as e:
             print(f"Ошибка таймера: {err_text(e)}")
 
@@ -117,7 +119,7 @@ def main():
                                 if msg["peer_id"] >= CHAT_OFFSET:
                                     handle_message(msg)
                                 else:
-                                    if not (owner_dm_hook(msg) or check_dm_hook(msg)):   # «рассылка» и «чек подтвердить / отказать» владельца
+                                    if not (owner_dm_hook(msg) or check_dm_hook(msg) or clan_dm_hook(msg)):   # «рассылка», «чек» владельца; команды кланов и фото аватарки
                                         handle_dm(msg)       # личка: репорты
                             elif event.type == VkBotEventType.MESSAGE_EVENT:
                                 handle_callback(event.obj)

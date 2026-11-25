@@ -16,7 +16,7 @@ from config import (
 from database import economy, get_user, save_economy, vip_active
 from helpers import (
     active_dialog_of, edit_message, fmt_duration, fmt_num, fmt_time, get_names, mention,
-    msg_photos, send, send_dm,
+    msg_photos, parse_target, send, send_dm,
 )
 from logs import log_action
 from player import add_exp, sanitize_prefix
@@ -158,45 +158,97 @@ def donate_details(key):
         "• заказать: «донат префикс ТЕКСТ» или кнопка «Купить»",
     ]
 
+# ---------- Витрина: меню → товар. Страницы: 0 — меню, 1..N — товары (DONATE_KEYS), N+1 — наборы ----------
+DONATE_BASIC = tuple(k for k in DONATE_KEYS if k not in PACK_KEYS)      # вампир, зелье, вирты, префикс, питомец
+DONATE_PACK_PAGE = len(DONATE_KEYS) + 1                                 # страница «Наборы»
+DONATE_LAST_PAGE = DONATE_PACK_PAGE                                     # последняя страница для листалки в handlers.py
+
+def donate_balance(user):
+    """Донат-баланс игрока в рублях (его выдаёт владелец командой «донат ТЕГ СУММА»)."""
+    try:
+        return max(0, int(user.get("donate", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+def _balance_line(user, price=None):
+    bal = donate_balance(user)
+    if price is None:
+        return f"💎 Ваш донат-баланс: {bal} ₽"
+    if bal >= price:
+        return f"💎 Ваш донат-баланс: {bal} ₽ — хватает на покупку"
+    return f"💎 Ваш донат-баланс: {bal} ₽" + (f" (не хватает {price - bal} ₽)" if bal else "")
+
 def build_donate_page(peer_id, page, opener_id):
-    """Страница 0 — все привилегии списком, страницы 1–3 — по одной привилегии: характеристика и кнопка покупки."""
+    """Меню — 6 крупных кнопок; наборы — отдельная страница; у товара: «Купить» и «◀ ☰ ▶»."""
     user = get_user(opener_id)
+    if page < 0 or page > DONATE_LAST_PAGE:
+        page = 0
     if page == 0:
-        lines = ["💎 Донат — привилегии", ""]
-        for key in DONATE_KEYS:
+        lines = ["💎 Донат — привилегии", "", _balance_line(user), ""]
+        for key in DONATE_BASIC:
             item = DONATE_ITEMS[key]
             lines.append(f"{item['title']} — {donate_price_text(item)}")
-        lines += ["", "Нажмите на привилегию, чтобы узнать, что это и для чего. Листать можно кнопками ◀ ▶.",
-                  "",
-                  "Как купить: на странице привилегии нажмите «Купить» — реквизиты придут вам в личные сообщения. "
-                  "Оплата через Сбер: по QR-коду или переводом на карту. Награда выдаётся после проверки оплаты.",
-                  "Для ЛС бот должен уметь вам писать: если не приходит — напишите ему первым в личку."]
+        if PACK_KEYS:
+            lines.append(f"📦 Наборы — от {min(DONATE_ITEMS[k]['price'] for k in PACK_KEYS)} ₽")
+        lines += ["", "Нажмите на привилегию — расскажу, что это, и покажу кнопку покупки.",
+                  "Оплата: донат-баланс (если выдан владельцем) или Сбер — по QR либо переводом на карту; "
+                  "реквизиты придут в личные сообщения. Если ЛС не открыты, напишите боту первым."]
         kb = VkKeyboard(inline=True)
-        for i, key in enumerate(DONATE_KEYS, 1):
-            if i > 1 and (i - 1) % 2 == 0:
+        for i, key in enumerate(DONATE_BASIC):
+            if i and i % 2 == 0:
                 kb.add_line()
             kb.add_callback_button(DONATE_ITEMS[key]["title"][:40], VkKeyboardColor.PRIMARY,
-                                   {"cmd": "dpg", "p": i, "o": opener_id})
+                                   {"cmd": "dpg", "p": DONATE_KEYS.index(key) + 1, "o": opener_id})
+        if PACK_KEYS:
+            if len(DONATE_BASIC) % 2 == 0:
+                kb.add_line()
+            kb.add_callback_button("📦 Наборы", VkKeyboardColor.POSITIVE, {"cmd": "dpg", "p": DONATE_PACK_PAGE, "o": opener_id})
+        return "\n".join(lines), kb.get_keyboard()
+
+    if page == DONATE_PACK_PAGE:
+        lines = ["📦 Донат — наборы", "", _balance_line(user), ""]
+        for key in PACK_KEYS:
+            item = DONATE_ITEMS[key]
+            lines.append(f"{item['title']} — {donate_price_text(item)}")
+        lines += ["", "Нажмите на набор, чтобы посмотреть, что внутри. Всё выдаётся сразу после оплаты, наборы можно покупать повторно."]
+        kb = VkKeyboard(inline=True)
+        for i, key in enumerate(PACK_KEYS):
+            if i and i % 2 == 0:
+                kb.add_line()
+            kb.add_callback_button(DONATE_ITEMS[key]["title"][:40], VkKeyboardColor.PRIMARY,
+                                   {"cmd": "dpg", "p": DONATE_KEYS.index(key) + 1, "o": opener_id})
+        kb.add_line()
+        kb.add_callback_button("☰ Меню", VkKeyboardColor.SECONDARY, {"cmd": "dpg", "p": 0, "o": opener_id})
         return "\n".join(lines), kb.get_keyboard()
 
     key = DONATE_KEYS[page - 1]
     item = DONATE_ITEMS[key]
-    lines = [f"💎 Донат — {page}/{len(DONATE_KEYS)}", "", item["title"], f"Цена: {donate_price_text(item)}", ""]
+    price = int(item["price"])
+    is_pack = key in PACK_KEYS
+    lines = ["💎 Донат — " + item["title"], f"Цена: {donate_price_text(item)}", _balance_line(user, price), ""]
     lines += donate_details(key)
-    prev_page = page - 1 if page > 1 else len(DONATE_KEYS)
-    next_page = page + 1 if page < len(DONATE_KEYS) else 1
+    group = [DONATE_KEYS.index(k) + 1 for k in (PACK_KEYS if is_pack else DONATE_BASIC)]    # листаем внутри своей группы
+    pos = group.index(page)
+    prev_page, next_page = group[pos - 1], group[(pos + 1) % len(group)]
+    hub = DONATE_PACK_PAGE if is_pack else 0
     kb = VkKeyboard(inline=True)
-    kb.add_callback_button("◀ Назад", VkKeyboardColor.SECONDARY, {"cmd": "dpg", "p": prev_page, "o": opener_id})
-    kb.add_callback_button("☰ Меню", VkKeyboardColor.PRIMARY, {"cmd": "dpg", "p": 0, "o": opener_id})
-    kb.add_callback_button("Вперед ▶", VkKeyboardColor.SECONDARY, {"cmd": "dpg", "p": next_page, "o": opener_id})
-    kb.add_line()
-    if key == "vamp" and user.get("vampire"):
-        kb.add_callback_button("🧛 Вампир — уже у вас", VkKeyboardColor.SECONDARY, {"cmd": "don", "act": "have", "k": "vamp", "o": opener_id})
-    elif key == "pet" and has_pet(user, DONATE_PET_ID):
-        kb.add_callback_button("🐶 Питомец — уже у вас", VkKeyboardColor.SECONDARY, {"cmd": "don", "act": "have", "k": "pet", "o": opener_id})
-    else:
-        kb.add_callback_button(f"🛒 Купить · {item['price']} ₽", VkKeyboardColor.POSITIVE,
+    owned = (key == "vamp" and user.get("vampire")) or (key == "pet" and has_pet(user, DONATE_PET_ID))
+    if owned:
+        kb.add_callback_button("🧛 Вампир — уже у вас" if key == "vamp" else "🐶 Питомец — уже у вас",
+                               VkKeyboardColor.SECONDARY, {"cmd": "don", "act": "have", "k": key, "o": opener_id})
+    elif donate_balance(user) >= price:
+        kb.add_callback_button(f"💎 Купить с баланса · {price} ₽", VkKeyboardColor.POSITIVE,
+                               {"cmd": "don", "act": "bal", "k": key, "o": opener_id})
+        kb.add_line()
+        kb.add_callback_button("💳 Оплатить деньгами", VkKeyboardColor.SECONDARY,
                                {"cmd": "don", "act": "buy", "k": key, "o": opener_id})
+    else:
+        kb.add_callback_button(f"🛒 Купить · {price} ₽", VkKeyboardColor.POSITIVE,
+                               {"cmd": "don", "act": "buy", "k": key, "o": opener_id})
+    kb.add_line()
+    kb.add_callback_button("◀", VkKeyboardColor.SECONDARY, {"cmd": "dpg", "p": prev_page, "o": opener_id})
+    kb.add_callback_button("☰ Меню" if not is_pack else "☰ Наборы", VkKeyboardColor.PRIMARY, {"cmd": "dpg", "p": hub, "o": opener_id})
+    kb.add_callback_button("▶", VkKeyboardColor.SECONDARY, {"cmd": "dpg", "p": next_page, "o": opener_id})
     return "\n".join(lines), kb.get_keyboard()
 
 def donate_menu(uid):
@@ -268,6 +320,92 @@ def donate_create(uid, item_key, data="", chat_peer=None):
     save_economy()
     log_action(where, uid, f"донат: заказ №{order['id']} {item_key} {item['price']}₽")
     return "📩 Реквизиты отправил вам в личные сообщения."
+
+def _donate_precheck(uid, item_key):
+    """Те же запреты, что у обычной покупки: уже есть вампир/питомец, зелье ещё действует. Текст ошибки или None."""
+    user = get_user(uid)
+    if item_key == "vamp" and user.get("vampire"):
+        return f"🧛 Вы уже {VAMPIRE_TITLE}."
+    if item_key == "pet" and has_pet(user, DONATE_PET_ID):
+        return f"🐶 Питомец «{PETS[DONATE_PET_ID]['name']}» у вас уже есть."
+    if item_key == "heal":
+        if user.get("vampire"):
+            return f"🧛 {VAMPIRE_TITLE}ов другие вампиры не кусают — зелье вам не нужно."
+        if heal_left(user) > 0:
+            return f"🧪 Зелье уже действует, осталось {fmt_duration(heal_left(user))}. Купить новое можно после окончания."
+    return None
+
+def donate_buy_balance(uid, item_key, data="", chat_peer=None):
+    """Покупка за донат-баланс: заказ создаётся и сразу выполняется (награда — строго один раз, как при оплате картой)."""
+    item = DONATE_ITEMS[item_key]
+    if donate_blocked(uid):
+        return "🚫 Вам закрыт доступ к донату."
+    err = _donate_precheck(uid, item_key)
+    if err:
+        return err
+    user = get_user(uid)
+    now = time.time()
+    wait = user.get("last_order", 0) + DONATE_CREATE_COOLDOWN - now
+    if wait > 0:
+        return f"⏳ Подождите {int(wait) + 1} сек."
+    price, bal = int(item["price"]), donate_balance(user)
+    if bal < price:
+        return f"💎 Не хватает {price - bal} ₽: на донат-балансе {bal} ₽, нужно {price} ₽."
+    economy["seq"]["donate"] += 1
+    order = {"id": economy["seq"]["donate"], "uid": uid, "item": item_key, "price": price, "status": "new",
+             "t": now, "peer": chat_peer, "data": data, "method": "balance"}
+    economy["donate_orders"][str(order["id"])] = order
+    user["donate"] = bal - price
+    user["last_order"] = now
+    try:
+        donate_finish(order)
+    except Exception as e:
+        print(f"Не удалось выдать покупку за донат-баланс (заказ №{order['id']}): {err_text(e)}")
+        if order.get("status") != "paid":          # награда не выдана — возвращаем деньги на баланс
+            user["donate"] = bal
+            order["status"] = "cancelled"
+            save_economy()
+            return "⚠ Не удалось оформить покупку — деньги остались на донат-балансе. Попробуйте ещё раз."
+    log_action(chat_peer or uid, uid, f"донат с баланса: заказ №{order['id']} {item_key} {price}₽")
+    return f"✅ Куплено за {price} ₽ с донат-баланса. Остаток: {donate_balance(user)} ₽"
+
+_RUB_RE = re.compile(r"^([+-]?\d{1,7})\s*(?:₽|р|руб\w*|rub)?\.?$", re.IGNORECASE)
+DONATE_GRANT_MAX = 1_000_000
+
+def donate_grant_command(msg, rest):
+    """Владелец: «донат @ник 100» / «донат ID 100» / ответом «донат 100» — выдать донат-рубли; «-50» — забрать.
+    Возвращает True, если это была такая команда."""
+    peer_id, uid = msg["peer_id"], msg["from_id"]
+    target, tail = parse_target(msg, rest)
+    if target is None:
+        return False
+    m = _RUB_RE.match(tail.strip())
+    if not m:
+        return False
+    amount = int(m.group(1))
+    if amount == 0 or abs(amount) > DONATE_GRANT_MAX:
+        send(peer_id, f"⚠ Сумма: от 1 до {fmt_num(DONATE_GRANT_MAX)} ₽ (со знаком «-» — списать).")
+        return True
+    if target <= 0:
+        send(peer_id, "⚠ Донат нельзя выдать сообществу.")
+        return True
+    user = get_user(target)
+    bal = donate_balance(user)
+    if bal + amount < 0:
+        send(peer_id, f"⚠ Нельзя уйти в минус: у игрока на донат-балансе {bal} ₽.")
+        return True
+    user["donate"] = bal + amount
+    save_economy()
+    names = get_names([target])
+    who = mention(target, names)
+    if amount > 0:
+        send(peer_id, f"💎 {who} получил(а) +{amount} ₽ на донат-баланс.\nБаланс: {user['donate']} ₽ — потратить: «донат»")
+        donate_notify(target, f"💎 Вам начислено {amount} ₽ на донат-баланс! Баланс: {user['donate']} ₽.\n"
+                              "Купить привилегии за донат: напишите «донат» в беседе или мне.")
+    else:
+        send(peer_id, f"💎 У {who} списано {-amount} ₽. Баланс: {user['donate']} ₽")
+    log_action(peer_id, uid, f"донат-баланс {target}: {amount:+d}₽ (теперь {user['donate']})")
+    return True
 
 def donate_steps(order, method):
     """Шаги оплаты выбранным способом."""
@@ -500,6 +638,24 @@ def donate_action(ev, p):
             return f"Заказ №{o['id']} подтверждён ✅"
         donate_reject(o, block=(act == "ban"))
         return f"Заказ №{o['id']} отклонён" + (", игрок заблокирован" if act == "ban" else "")
+    if act == "bal":                                # витрина: купить за донат-баланс
+        if uid != p.get("o"):
+            return "Это окно открыл другой участник."
+        key = p.get("k")
+        if key == "pref":
+            if donate_blocked(uid):
+                return "🚫 Вам закрыт доступ к донату."
+            try:
+                send_dm(uid, f"{DONATE_ITEMS['pref']['title']} — {DONATE_ITEMS['pref']['price']} ₽ (спишется с донат-баланса)\n\n"
+                             f"Напишите мне сюда: донат купить префикс ВАШ_ТЕКСТ (до {DONATE_PREFIX_MAX} символов)\n"
+                             "Пример: донат купить префикс Король чата")
+            except Exception as e:
+                print(f"Не удалось написать игроку {uid} в ЛС: {err_text(e)}")
+                return donate_dm_closed(peer_id, uid)
+            return "📩 Инструкция в личных сообщениях."
+        if key not in ("vamp", "heal", "virt", "pet") + PACK_KEYS:
+            return "Кнопка устарела. Напишите «донат» заново."
+        return donate_buy_balance(uid, key, chat_peer=peer_id if peer_id >= CHAT_OFFSET else None)
     if act in ("buy", "have"):                     # витрина
         if uid != p.get("o"):
             return "Это окно открыл другой участник."
@@ -635,6 +791,9 @@ def donate_owner_command(msg, word, tail):
         return True
     return False
 
+DONATE_WORDS = {"вампир": "vamp", "vampire": "vamp", "зелье": "heal", "heal": "heal", "вирты": "virt", "virt": "virt",
+                "питомец": "pet", "pet": "pet"}
+
 def cmd_donate(msg, rest, slash):
     peer_id, uid = msg["peer_id"], msg["from_id"]
     chat_peer = peer_id if peer_id >= CHAT_OFFSET else None
@@ -642,12 +801,33 @@ def cmd_donate(msg, rest, slash):
     word = word.lower().replace("ё", "е")
     if uid == OWNER_ID and donate_owner_command(msg, word, tail):
         return
+    if uid == OWNER_ID and donate_grant_command(msg, rest):      # «донат @ник 100»
+        return
+    if word in ("баланс", "balance", "счет", "счёт"):
+        bal = donate_balance(get_user(uid))
+        send(peer_id, f"💎 Ваш донат-баланс: {bal} ₽\n" + ("Потратить: «донат» → выберите привилегию → «Купить с баланса»." if bal else
+                                                       "Пополнить баланс выдаёт владелец. Привилегии за деньги: «донат»."))
+        return
+    if word in ("купить", "buy"):                              # «донат купить вампир» — оплата с донат-баланса
+        w2, _, t2 = tail.strip().partition(" ")
+        w2 = w2.lower().replace("ё", "е")
+        if w2 in ("префикс", "prefix"):
+            new, err = donate_prefix_check(t2)
+            send(peer_id, err or donate_buy_balance(uid, "pref", new, chat_peer))
+        elif w2 in ("набор", "pack"):
+            key = PACK_WORDS.get(t2.strip().lower().replace("ё", "е").replace("набор ", ""))
+            send(peer_id, donate_buy_balance(uid, key, chat_peer=chat_peer) if key else "ℹ️ Пример: донат купить набор новичка")
+        elif w2 in DONATE_WORDS:
+            send(peer_id, donate_buy_balance(uid, DONATE_WORDS[w2], chat_peer=chat_peer))
+        else:
+            send(peer_id, "ℹ️ Оплата с донат-баланса: донат купить вампир / зелье / вирты / питомец / набор новичка / префикс ТЕКСТ\n"
+                          "Или кнопкой в меню «донат». Баланс: «донат баланс».")
+        return
     if word in ("префикс", "prefix"):
         new, err = donate_prefix_check(tail)
         send(peer_id, err or donate_create(uid, "pref", new, chat_peer))
         return
-    donate_words = {"вампир": "vamp", "vampire": "vamp", "зелье": "heal", "heal": "heal", "вирты": "virt", "virt": "virt",
-                    "питомец": "pet", "pet": "pet"}
+    donate_words = DONATE_WORDS
     if word in ("набор", "наборы", "pack", "packs"):
         key = PACK_WORDS.get(tail.strip().lower().replace("ё", "е").replace("набор ", ""))
         if key:

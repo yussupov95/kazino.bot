@@ -9,6 +9,7 @@ from bank import cmd_bank
 from bitcoin import cmd_btc, cmd_buy, cmd_sell
 from business import biz_action, cmd_biz, cmd_income
 from check import check_callback, cmd_check
+from clan import clan_action, cmd_clan, cmd_clan_armor, cmd_clan_shields, cmd_clan_swords, cmd_clan_top
 from config import (
     BARE_COMMANDS, BOT_MENTION_RE, CHAT_OFFSET, COMMAND_CATEGORIES, DRONE_WORDS, err_text,
     has_perk, HISTORY_PAGES, MIN_LEVEL_HELP, OWNER_ID, ROLES,
@@ -17,7 +18,7 @@ from contest import contest_try_answer
 from crash import cmd_crash
 from debt import cmd_debt_give, cmd_debt_return, cmd_debts, debt_action
 from database import count_message, economy, freeze_left, get_level, get_user, mute_left
-from donate import build_donate_page, cmd_donate, donate_action, DONATE_KEYS
+from donate import build_donate_page, cmd_donate, donate_action, DONATE_LAST_PAGE
 from duel import cmd_duel, duel_action
 from extras import (
     cmd_safe, cmd_steal, handle_appeal_callback, safe_action,
@@ -85,7 +86,7 @@ def handle_callback(ev):
     if cmd == "appeal":               # «Я заполнил(а)» под апелляцией (в беседе и в ЛС)
         handle_appeal_callback(ev, payload)
         return
-    if ev["peer_id"] < CHAT_OFFSET and cmd not in ("shop", "biz", "don", "dpg", "pet"):   # всё остальное работает только в беседах (магазин, бизнесы и питомцы — и в ЛС)
+    if ev["peer_id"] < CHAT_OFFSET and cmd not in ("shop", "biz", "don", "dpg", "pet", "clan"):   # всё остальное работает только в беседах (магазин, бизнесы и питомцы — и в ЛС)
         answer_event(ev, "Эта кнопка работает только в беседе.")
         return
 
@@ -98,7 +99,7 @@ def handle_callback(ev):
     actions = {"mines": mines_action, "duel": duel_action, "vip": vip_action,
                "roul": roulette_action, "fish": fish_action, "shop": shop_action, "biz": biz_action,
                "auc": auction_action, "debt": debt_action, "don": donate_action, "safe": safe_action,
-               "pet": pet_action}
+               "pet": pet_action, "clan": clan_action}
     if cmd in actions:
         note = None
         try:
@@ -138,7 +139,7 @@ PAGERS = {
     "help": (build_help_page, 1, len(ROLES) + 1),
     "history": (build_history_page, 1, HISTORY_PAGES),
     "cmds": (build_commands_page, 0, len(COMMAND_CATEGORIES)),
-    "dpg": (build_donate_page, 0, len(DONATE_KEYS)),
+    "dpg": (build_donate_page, 0, DONATE_LAST_PAGE),
 }
 # Команды из двух слов
 TWO_WORD_COMMANDS = {
@@ -171,6 +172,22 @@ TWO_WORD_COMMANDS = {
     ("+", "норма"): "+норма",
     ("-", "норма"): "-норма",
     ("+", "перенорма"): "+перенорма",
+    # кланы
+    ("топ", "клан"): "топ_клан",
+    ("топ", "кланы"): "топ_клан",
+    ("топ", "кланов"): "топ_клан",
+    ("top", "clan"): "топ_клан",
+    ("top", "clans"): "топ_клан",
+    ("купить", "меч"): "клан_мечи",
+    ("купить", "мечи"): "клан_мечи",
+    ("купить", "мечей"): "клан_мечи",
+    ("купить", "щит"): "клан_щиты",
+    ("купить", "щиты"): "клан_щиты",
+    ("купить", "щитов"): "клан_щиты",
+    ("купить", "доспех"): "клан_доспехи",
+    ("купить", "доспехи"): "клан_доспехи",
+    ("купить", "доспехов"): "клан_доспехи",
+    ("купить", "броня"): "клан_доспехи",
 }
 
 MASS_MENTION_RE = re.compile(r"(?<![\w@])[@*](all|everyone|online|here|все|всем|онлайн|здесь)(?![\w])", re.IGNORECASE)
@@ -328,3 +345,8 @@ register(("долг_вернуть",), cmd_debt_return)
 register(("долги", "debts"), cmd_debts)
 register(("краш", "crash"), cmd_crash)
 register(("чек", "check"), cmd_check)
+register(("клан", "clan"), cmd_clan)
+register(("топ_клан",), cmd_clan_top)
+register(("клан_мечи",), cmd_clan_swords)
+register(("клан_щиты",), cmd_clan_shields)
+register(("клан_доспехи",), cmd_clan_armor)
